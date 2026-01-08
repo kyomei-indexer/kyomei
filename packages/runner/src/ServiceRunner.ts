@@ -1,0 +1,399 @@
+import type { KyomeiConfig } from "@kyomei/config";
+import type { Database } from "@kyomei/database";
+import {
+  EventRepository,
+  SyncCheckpointRepository,
+  ProcessCheckpointRepository,
+  FactoryRepository,
+  RpcCacheRepository,
+} from "@kyomei/database";
+import type { ILogger, IBlockSource, IRpcClient } from "@kyomei/core";
+import {
+  RpcClient,
+  RpcBlockSource,
+  ErpcBlockSource,
+  CachedRpcClient,
+} from "@kyomei/core";
+import { ChainSyncer, FactoryWatcher, ViewCreator } from "@kyomei/syncer";
+import { HandlerExecutor } from "@kyomei/processor";
+import { CronScheduler } from "@kyomei/cron";
+
+/**
+ * Service runner options
+ */
+export interface ServiceRunnerOptions {
+  config: KyomeiConfig;
+  db: Database;
+  logger: ILogger;
+  services: {
+    syncer: boolean;
+    processor: boolean;
+    api: boolean;
+    crons: boolean;
+  };
+}
+
+/**
+ * Service runner - orchestrates all indexer services
+ */
+export class ServiceRunner {
+  private readonly config: KyomeiConfig;
+  private readonly db: Database;
+  private readonly logger: ILogger;
+  private readonly services: ServiceRunnerOptions["services"];
+
+  // Repositories
+  private readonly eventRepo: EventRepository;
+  private readonly syncCheckpointRepo: SyncCheckpointRepository;
+  private readonly processCheckpointRepo: ProcessCheckpointRepository;
+  private readonly factoryRepo: FactoryRepository;
+  private readonly rpcCacheRepo: RpcCacheRepository;
+
+  // Services
+  private syncers: Map<string, ChainSyncer> = new Map();
+  private factoryWatchers: Map<string, FactoryWatcher> = new Map();
+  private processors: Map<string, HandlerExecutor> = new Map();
+  private cronScheduler?: CronScheduler;
+  private viewCreator: ViewCreator;
+
+  // Clients
+  private blockSources: Map<string, IBlockSource> = new Map();
+  private rpcClients: Map<string, IRpcClient> = new Map();
+
+  private isRunning = false;
+
+  constructor(options: ServiceRunnerOptions) {
+    this.config = options.config;
+    this.db = options.db;
+    this.logger = options.logger;
+    this.services = options.services;
+
+    // Initialize repositories
+    this.eventRepo = new EventRepository(this.db);
+    this.syncCheckpointRepo = new SyncCheckpointRepository(this.db);
+    this.processCheckpointRepo = new ProcessCheckpointRepository(this.db);
+    this.factoryRepo = new FactoryRepository(this.db);
+    this.rpcCacheRepo = new RpcCacheRepository(this.db);
+
+    // Initialize view creator
+    this.viewCreator = new ViewCreator({
+      db: this.db,
+      syncSchema: this.config.database.syncSchema ?? "kyomei_sync",
+      appSchema: this.config.database.appSchema ?? "kyomei_app",
+      logger: this.logger,
+    });
+  }
+
+  /**
+   * Start all configured services
+   */
+  async start(): Promise<void> {
+    if (this.isRunning) return;
+    this.isRunning = true;
+
+    this.logger.info("Starting service runner...");
+
+    // Initialize block sources and RPC clients
+    await this.initializeClients();
+
+    // Start syncer
+    if (this.services.syncer) {
+      await this.startSyncers();
+    }
+
+    // Start processor
+    if (this.services.processor) {
+      await this.startProcessors();
+    }
+
+    // Start crons
+    if (this.services.crons && this.config.crons) {
+      await this.startCrons();
+    }
+
+    // Start API
+    if (this.services.api) {
+      await this.startApi();
+    }
+
+    this.logger.info("All services started");
+  }
+
+  /**
+   * Stop all services
+   */
+  async stop(): Promise<void> {
+    if (!this.isRunning) return;
+
+    this.logger.info("Stopping all services...");
+
+    // Stop syncers
+    for (const [name, syncer] of this.syncers) {
+      await syncer.stop();
+      this.logger.debug(`Stopped syncer: ${name}`);
+    }
+
+    // Stop cron scheduler
+    if (this.cronScheduler) {
+      await this.cronScheduler.stop();
+    }
+
+    // Close block sources
+    for (const [name, source] of this.blockSources) {
+      await source.close();
+      this.logger.debug(`Closed block source: ${name}`);
+    }
+
+    this.isRunning = false;
+    this.logger.info("All services stopped");
+  }
+
+  /**
+   * Initialize block sources and RPC clients for all chains
+   */
+  private async initializeClients(): Promise<void> {
+    for (const [chainName, chainConfig] of Object.entries(this.config.chains)) {
+      const { source } = chainConfig;
+
+      // Create RPC client
+      let rpcUrl: string;
+      if (source.type === "rpc") {
+        rpcUrl = source.url;
+      } else if (source.type === "erpc") {
+        rpcUrl = source.url;
+      } else {
+        // For HyperSync and streams, we still need an RPC for contract reads
+        rpcUrl = ""; // Would need to be configured separately
+      }
+
+      if (rpcUrl) {
+        const rpcClient = new RpcClient({
+          chainId: chainConfig.id,
+          url: rpcUrl,
+        });
+        this.rpcClients.set(chainName, rpcClient);
+      }
+
+      // Create block source
+      let blockSource: IBlockSource;
+      switch (source.type) {
+        case "rpc":
+          blockSource = new RpcBlockSource({
+            chainId: chainConfig.id,
+            url: source.url,
+            pollingInterval: chainConfig.pollingInterval,
+            logger: this.logger,
+          });
+          break;
+        case "erpc":
+          blockSource = new ErpcBlockSource({
+            chainId: chainConfig.id,
+            url: source.url,
+            projectId: source.projectId,
+            pollingInterval: chainConfig.pollingInterval,
+            logger: this.logger,
+          });
+          break;
+        // HyperSync and Stream would be implemented here
+        default:
+          this.logger.warn(`Unsupported source type: ${source.type}`, {
+            chain: chainName,
+          });
+          continue;
+      }
+
+      this.blockSources.set(chainName, blockSource);
+      this.logger.debug(`Initialized block source for ${chainName}`);
+    }
+  }
+
+  /**
+   * Start syncers for all chains
+   */
+  private async startSyncers(): Promise<void> {
+    for (const [chainName, chainConfig] of Object.entries(this.config.chains)) {
+      const blockSource = this.blockSources.get(chainName);
+      if (!blockSource) continue;
+
+      // Get contracts for this chain
+      const contracts = Object.entries(this.config.contracts)
+        .filter(([, c]) => c.chain === chainName)
+        .map(([name, c]) => ({ name, ...c }));
+
+      if (contracts.length === 0) {
+        this.logger.debug(
+          `No contracts for chain ${chainName}, skipping syncer`
+        );
+        continue;
+      }
+
+      // Create factory watcher
+      const factoryWatcher = new FactoryWatcher({
+        chainId: chainConfig.id,
+        chainName,
+        contracts,
+        blockSource,
+        factoryRepository: this.factoryRepo,
+        logger: this.logger,
+      });
+      this.factoryWatchers.set(chainName, factoryWatcher);
+
+      // Create syncer
+      const syncer = new ChainSyncer({
+        chainId: chainConfig.id,
+        chainName,
+        chainConfig,
+        contracts,
+        blockSource,
+        eventRepository: this.eventRepo,
+        checkpointRepository: this.syncCheckpointRepo,
+        logger: this.logger,
+        onProgress: (progress) => {
+          this.logger.progress({
+            chain: progress.chainName,
+            currentBlock: progress.currentBlock,
+            targetBlock: progress.targetBlock,
+            startBlock: progress.startBlock,
+            phase: progress.phase === "historical" ? "syncing" : "live",
+            blocksPerSecond: progress.blocksPerSecond,
+          });
+        },
+      });
+
+      this.syncers.set(chainName, syncer);
+
+      // Start syncer (non-blocking)
+      syncer.start().catch((error) => {
+        this.logger.error(`Syncer error for ${chainName}`, {
+          error: error as Error,
+        });
+      });
+
+      this.logger.info(`Started syncer for ${chainName}`);
+    }
+
+    // Create views after syncers initialize
+    for (const [chainName, chainConfig] of Object.entries(this.config.chains)) {
+      const contracts = Object.entries(this.config.contracts)
+        .filter(([, c]) => c.chain === chainName)
+        .map(([name, c]) => ({ name, ...c }));
+
+      await this.viewCreator.createViewsForContracts(contracts, chainConfig.id);
+    }
+  }
+
+  /**
+   * Start processors for all chains
+   */
+  private async startProcessors(): Promise<void> {
+    for (const [chainName, chainConfig] of Object.entries(this.config.chains)) {
+      const rpcClient = this.rpcClients.get(chainName);
+      if (!rpcClient) continue;
+
+      // Get contracts for this chain
+      const contracts = Object.entries(this.config.contracts)
+        .filter(([, c]) => c.chain === chainName)
+        .map(([name, c]) => ({ name, ...c }));
+
+      if (contracts.length === 0) continue;
+
+      // Create cached RPC client
+      const cachedRpc = new CachedRpcClient({
+        client: rpcClient,
+        cacheRepo: this.rpcCacheRepo,
+        logger: this.logger,
+      });
+
+      // Create processor
+      const processor = new HandlerExecutor({
+        chainId: chainConfig.id,
+        chainName,
+        contracts,
+        db: this.db,
+        appSchema: this.config.database.appSchema ?? "kyomei_app",
+        eventRepository: this.eventRepo,
+        checkpointRepository: this.processCheckpointRepo,
+        rpcClient: cachedRpc,
+        logger: this.logger,
+      });
+
+      this.processors.set(chainName, processor);
+      this.logger.info(`Initialized processor for ${chainName}`);
+    }
+  }
+
+  /**
+   * Start cron scheduler
+   */
+  private async startCrons(): Promise<void> {
+    if (!this.config.crons || this.config.crons.length === 0) return;
+
+    // Build chain ID map
+    const chainIds = new Map<string, number>();
+    for (const [name, config] of Object.entries(this.config.chains)) {
+      chainIds.set(name, config.id);
+    }
+
+    this.cronScheduler = new CronScheduler({
+      db: this.db,
+      rpcClients: this.rpcClients,
+      chainIds,
+      logger: this.logger,
+      cronsSchema: this.config.database.cronsSchema ?? "kyomei_crons",
+      appSchema: this.config.database.appSchema ?? "kyomei_app",
+    });
+
+    // Register crons (handlers would be loaded from config.handler paths)
+    // This is a placeholder - actual implementation would dynamically import handlers
+    for (const cronConfig of this.config.crons) {
+      // await this.cronScheduler.register(cronConfig, handler);
+      this.logger.debug(`Registered cron: ${cronConfig.name}`);
+    }
+
+    await this.cronScheduler.start();
+    this.logger.info("Cron scheduler started");
+  }
+
+  /**
+   * Start API server
+   */
+  private async startApi(): Promise<void> {
+    const { ApiServer } = await import("@kyomei/api");
+
+    const apiServer = new ApiServer({
+      db: this.db,
+      appSchema: this.config.database.appSchema ?? "kyomei_app",
+      logger: this.logger,
+      host: this.config.api?.host ?? "0.0.0.0",
+      port: this.config.api?.port ?? 42069,
+      graphqlPath: this.config.api?.graphql?.path ?? "/graphql",
+    });
+
+    await apiServer.start();
+  }
+
+  /**
+   * Get status of all services
+   */
+  getStatus(): {
+    isRunning: boolean;
+    syncers: Map<string, ReturnType<ChainSyncer["getStatus"]>>;
+    blockSources: string[];
+    rpcClients: string[];
+  } {
+    const syncerStatus = new Map<
+      string,
+      ReturnType<ChainSyncer["getStatus"]>
+    >();
+    for (const [name, syncer] of this.syncers) {
+      syncerStatus.set(name, syncer.getStatus());
+    }
+
+    return {
+      isRunning: this.isRunning,
+      syncers: syncerStatus,
+      blockSources: Array.from(this.blockSources.keys()),
+      rpcClients: Array.from(this.rpcClients.keys()),
+    };
+  }
+}

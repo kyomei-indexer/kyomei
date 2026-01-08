@@ -1,0 +1,92 @@
+# eRPC Configuration for Kyomei
+# https://github.com/erpc/erpc
+
+logLevel: info
+
+server:
+  httpHost: 0.0.0.0
+  httpPort: 4000
+  maxTimeout: 60s
+
+metrics:
+  enabled: true
+  host: 0.0.0.0
+  port: 4001
+
+database:
+  evmJsonRpcCache:
+    driver: postgresql
+    postgresql:
+      connectionUri: postgresql://kyomei:kyomei@timescaledb:5432/kyomei?schema=erpc_cache
+      table: rpc_cache
+
+projects:
+  - id: kyomei
+    networks:
+      # Ethereum Mainnet
+      - architecture: evm
+        evm:
+          chainId: 1
+        failsafe:
+          timeout:
+            duration: 30s
+          retry:
+            maxAttempts: 3
+            delay: 500ms
+            backoffMaxDelay: 10s
+            backoffMultiplier: 2
+            jitter: 200ms
+          circuitBreaker:
+            failureThresholdCount: 5
+            failureThresholdCapacity: 10
+            halfOpenAfter: 30s
+            successThresholdCount: 3
+            successThresholdCapacity: 5
+        upstreams:
+          # Add your RPC endpoints here
+          # - endpoint: https://eth.llamarpc.com
+          #   type: evm
+          # - endpoint: https://rpc.ankr.com/eth
+          #   type: evm
+          - endpoint: ${ETHEREUM_RPC_URL:-https://eth.llamarpc.com}
+            type: evm
+
+      # Optimism
+      - architecture: evm
+        evm:
+          chainId: 10
+        upstreams:
+          - endpoint: ${OPTIMISM_RPC_URL:-https://mainnet.optimism.io}
+            type: evm
+
+      # Arbitrum One
+      - architecture: evm
+        evm:
+          chainId: 42161
+        upstreams:
+          - endpoint: ${ARBITRUM_RPC_URL:-https://arb1.arbitrum.io/rpc}
+            type: evm
+
+      # Base
+      - architecture: evm
+        evm:
+          chainId: 8453
+        upstreams:
+          - endpoint: ${BASE_RPC_URL:-https://mainnet.base.org}
+            type: evm
+
+      # Polygon
+      - architecture: evm
+        evm:
+          chainId: 137
+        upstreams:
+          - endpoint: ${POLYGON_RPC_URL:-https://polygon-rpc.com}
+            type: evm
+
+rateLimiters:
+  budgets:
+    - id: default-budget
+      rules:
+        - method: '*'
+          maxCount: 1000
+          period: 1s

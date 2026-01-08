@@ -1,0 +1,35 @@
+version: '3.8'
+
+# Test-specific configuration - isolated database for testing
+services:
+  timescaledb-test:
+    image: timescale/timescaledb:latest-pg16
+    container_name: kyomei-timescaledb-test
+    environment:
+      POSTGRES_USER: kyomei_test
+      POSTGRES_PASSWORD: kyomei_test
+      POSTGRES_DB: kyomei_test
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kyomei_test -d kyomei_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    tmpfs:
+      - /var/lib/postgresql/data
+
+  localstack-test:
+    image: localstack/localstack:latest
+    container_name: kyomei-localstack-test
+    environment:
+      SERVICES: s3
+      DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    ports:
+      - "4567:4566"
+    tmpfs:
+      - /var/lib/localstack

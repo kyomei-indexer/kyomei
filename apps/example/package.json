@@ -1,0 +1,26 @@
+{
+  "name": "@kyomei/example",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Example Uniswap V2 indexer using Kyomei",
+  "type": "module",
+  "scripts": {
+    "dev": "kyomei dev -vvvv",
+    "start": "kyomei start -vv",
+    "migrate": "kyomei migrate",
+    "backup": "kyomei backup --create",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@kyomei/cli": "workspace:*",
+    "@kyomei/config": "workspace:*",
+    "@kyomei/core": "workspace:*",
+    "@kyomei/database": "workspace:*",
+    "@kyomei/processor": "workspace:*",
+    "drizzle-orm": "^0.38.3",
+    "viem": "^2.21.54"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}

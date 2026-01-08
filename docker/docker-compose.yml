@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  # TimescaleDB - Primary database with time-series extensions
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: kyomei-timescaledb
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: kyomei
+      POSTGRES_PASSWORD: kyomei
+      POSTGRES_DB: kyomei
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kyomei -d kyomei"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # LocalStack - S3-compatible storage for backups
+  localstack:
+    image: localstack/localstack:latest
+    container_name: kyomei-localstack
+    restart: unless-stopped
+    environment:
+      SERVICES: s3
+      DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    ports:
+      - "4566:4566"
+    volumes:
+      - localstack_data:/var/lib/localstack
+      - ./localstack-init:/etc/localstack/init/ready.d
+
+  # eRPC - Fault-tolerant RPC proxy with caching
+  erpc:
+    image: ghcr.io/erpc/erpc:latest
+    container_name: kyomei-erpc
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+      - "4001:4001"
+    volumes:
+      - ./erpc.yaml:/root/erpc.yaml
+    command: /root/erpc.yaml
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+
+volumes:
+  timescaledb_data:
+  localstack_data:

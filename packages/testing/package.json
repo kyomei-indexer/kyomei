@@ -1,0 +1,38 @@
+{
+  "name": "@kyomei/testing",
+  "version": "0.0.1",
+  "description": "Test utilities and harness for Kyomei",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@kyomei/config": "workspace:*",
+    "@kyomei/core": "workspace:*",
+    "@kyomei/database": "workspace:*",
+    "drizzle-orm": "^0.39.3",
+    "postgres": "^3.4.5",
+    "viem": "^2.21.54"
+  },
+  "devDependencies": {
+    "testcontainers": "^10.16.0",
+    "@testcontainers/postgresql": "^10.16.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
