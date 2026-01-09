@@ -10,7 +10,7 @@ const UniswapV2Factory = {
   abi: UniswapV2FactoryAbi,
   chain: "ethereum",
   address: "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f",
-  startBlock: 10000835,
+  startBlock: 23199095,
 } as const;
 
 const UniswapV2Pair = {
@@ -30,7 +30,7 @@ const UniswapV2Pair = {
     },
     parameter: "pair",
   }),
-  startBlock: 10000835,
+  startBlock: 23199095,
 } as const;
 
 /**
@@ -59,20 +59,24 @@ export default defineConfig({
     ethereum: {
       id: 1,
       source: {
-        type: "erpc",
-        url: process.env.ERPC_URL ?? "http://localhost:4000",
-        finality: "finalized",
+        type: "hypersync",
+        url: process.env.HYPERSYNC_URL ?? "https://eth.hypersync.xyz",
+        apiToken:
+          process.env.HYPERSYNC_API_TOKEN ??
+          "b54b47fd-5cd0-46b4-beb2-40ea2849f8ac",
+        fallbackRpc: process.env.FALLBACK_RPC_URL ?? "https://eth.llamarpc.com",
       },
       pollingInterval: 12000,
       /**
        * Sync configuration for parallel historical indexing
        * Splits the block range into chunks and processes them concurrently
+       *
        */
       sync: {
-        parallelWorkers: 4,
-        blockRangePerRequest: 2000,
-        blocksPerWorker: 250000,
-        eventBatchSize: 1000,
+        parallelWorkers: 1,
+        blockRangePerRequest: 250000,
+        blocksPerWorker: 2500000,
+        eventBatchSize: 100000,
       },
     },
   },

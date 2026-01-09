@@ -5,7 +5,7 @@
   "description": "Example Uniswap V2 indexer using Kyomei",
   "type": "module",
   "scripts": {
-    "dev": "kyomei dev -vvvv",
+    "dev": "kyomei dev -vv",
     "start": "kyomei start -vv",
     "migrate": "kyomei migrate",
     "backup": "kyomei backup --create",
