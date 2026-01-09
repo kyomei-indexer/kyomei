@@ -12,6 +12,7 @@ import {
   RpcClient,
   RpcBlockSource,
   ErpcBlockSource,
+  HyperSyncBlockSource,
   CachedRpcClient,
 } from "@kyomei/core";
 import { ChainSyncer, FactoryWatcher, ViewCreator } from "@kyomei/syncer";
@@ -194,7 +195,22 @@ export class ServiceRunner {
             logger: this.logger,
           });
           break;
-        // HyperSync and Stream would be implemented here
+        case "hypersync":
+          blockSource = new HyperSyncBlockSource({
+            chainId: chainConfig.id,
+            url: source.url,
+            logger: this.logger,
+          });
+          // HyperSync doesn't provide RPC, so we need a fallback RPC for contract reads
+          if (source.fallbackRpc) {
+            const rpcClient = new RpcClient({
+              chainId: chainConfig.id,
+              url: source.fallbackRpc,
+            });
+            this.rpcClients.set(chainName, rpcClient);
+          }
+          break;
+        // Stream would be implemented here
         default:
           this.logger.warn(`Unsupported source type: ${source.type}`, {
             chain: chainName,

@@ -1,2 +1,2 @@
-export { SchemaManager } from "./SchemaManager.js";
-export type { SchemaDefinition, TableDefinition } from "./SchemaManager.js";
+export { SchemaManager } from "./SchemaManager.ts";
+export type { SchemaDefinition, TableDefinition } from "./SchemaManager.ts";

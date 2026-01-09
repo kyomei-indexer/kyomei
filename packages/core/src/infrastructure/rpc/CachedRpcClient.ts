@@ -1,15 +1,15 @@
 import { createHash } from 'node:crypto';
-import type { Block } from '../../domain/entities/Block.js';
-import type { Log, LogFilter } from '../../domain/entities/Log.js';
-import type { Transaction, TransactionReceipt } from '../../domain/entities/Transaction.js';
+import type { Block } from '../../domain/entities/Block.ts';
+import type { Log, LogFilter } from '../../domain/entities/Log.ts';
+import type { Transaction, TransactionReceipt } from '../../domain/entities/Transaction.ts';
 import type {
   ICachedRpcClient,
   IRpcClient,
   ReadContractParams,
   RpcCallParams,
-} from '../../application/ports/IRpcClient.js';
-import type { IRpcCacheRepository } from '../../application/ports/IRpcCacheRepository.js';
-import type { ILogger } from '../../application/ports/ILogger.js';
+} from '../../application/ports/IRpcClient.ts';
+import type { IRpcCacheRepository } from '../../application/ports/IRpcCacheRepository.ts';
+import type { ILogger } from '../../application/ports/ILogger.ts';
 
 /**
  * Cached RPC client implementation

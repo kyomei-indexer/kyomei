@@ -1,4 +1,4 @@
-export { createTestDatabase, TestDatabase } from './utils/testDatabase.js';
-export { MockRpcClient } from './mocks/MockRpcClient.js';
-export { MockBlockSource } from './mocks/MockBlockSource.js';
-export { createTestConfig } from './utils/testConfig.js';
+export { createTestDatabase, TestDatabase } from './utils/testDatabase.ts';
+export { MockRpcClient } from './mocks/MockRpcClient.ts';
+export { MockBlockSource } from './mocks/MockBlockSource.ts';
+export { createTestConfig } from './utils/testConfig.ts';

@@ -1,5 +1,5 @@
 import { integer, bigint, varchar, text, timestamp, index, primaryKey } from 'drizzle-orm/pg-core';
-import { syncSchema } from './rawEvents.js';
+import { syncSchema } from './rawEvents.ts';
 
 /**
  * RPC cache table

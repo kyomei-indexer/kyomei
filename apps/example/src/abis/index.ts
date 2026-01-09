@@ -11,7 +11,7 @@ export const UniswapV2FactoryAbi = [
       { type: 'address', name: 'token0', indexed: true },
       { type: 'address', name: 'token1', indexed: true },
       { type: 'address', name: 'pair', indexed: false },
-      { type: 'uint256', name: '', indexed: false },
+      { type: 'uint256', name: 'pairIndex', indexed: false },
     ],
   },
   {

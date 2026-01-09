@@ -1,10 +1,10 @@
-import type { BlockRange, BlockWithLogs } from '../../domain/entities/Block.js';
-import { splitBlockRange } from '../../domain/entities/Block.js';
-import type { LogFilter } from '../../domain/entities/Log.js';
-import type { IBlockSource, BlockHandler, Unsubscribe, SourceType } from '../../application/ports/IBlockSource.js';
-import type { IRpcClient } from '../../application/ports/IRpcClient.js';
-import type { ILogger } from '../../application/ports/ILogger.js';
-import { RpcClient } from './RpcClient.js';
+import type { BlockRange, BlockWithLogs } from '../../domain/entities/Block.ts';
+import { splitBlockRange } from '../../domain/entities/Block.ts';
+import type { LogFilter } from '../../domain/entities/Log.ts';
+import type { IBlockSource, BlockHandler, Unsubscribe, SourceType } from '../../application/ports/IBlockSource.ts';
+import type { IRpcClient } from '../../application/ports/IRpcClient.ts';
+import type { ILogger } from '../../application/ports/ILogger.ts';
+import { RpcClient } from './RpcClient.ts';
 
 /**
  * RPC-based block source implementation

@@ -1,4 +1,4 @@
-import type { Database } from '../connection.js';
+import type { Database } from '../connection.ts';
 import { sql } from 'drizzle-orm';
 
 /**

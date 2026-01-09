@@ -1,6 +1,6 @@
 import type { Abi, AbiEvent } from 'viem';
 import { decodeEventLog, getAbiItem } from 'viem';
-import type { DecodedLog, Log } from '../../domain/entities/Log.js';
+import type { DecodedLog, Log } from '../../domain/entities/Log.ts';
 
 /**
  * Registered contract ABI with metadata

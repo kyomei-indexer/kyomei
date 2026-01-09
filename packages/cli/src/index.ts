@@ -1,4 +1,4 @@
-export { devCommand } from './commands/dev.js';
-export { startCommand } from './commands/start.js';
-export { migrateCommand } from './commands/migrate.js';
-export { backupCommand } from './commands/backup.js';
+export { devCommand } from './commands/dev.ts';
+export { startCommand } from './commands/start.ts';
+export { migrateCommand } from './commands/migrate.ts';
+export { backupCommand } from './commands/backup.ts';

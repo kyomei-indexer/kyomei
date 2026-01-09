@@ -36,8 +36,8 @@ export interface BlockWithLogs {
 /**
  * Import Log and Transaction for the interface
  */
-import type { Log } from './Log.js';
-import type { Transaction } from './Transaction.js';
+import type { Log } from './Log.ts';
+import type { Transaction } from './Transaction.ts';
 
 /**
  * Create a Block from raw RPC data

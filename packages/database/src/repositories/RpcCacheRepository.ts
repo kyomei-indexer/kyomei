@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { and, eq, gte, lte, sql } from 'drizzle-orm';
-import type { Database } from '../connection.js';
-import { rpcCache } from '../schemas/sync/index.js';
+import type { Database } from '../connection.ts';
+import { rpcCache } from '../schemas/sync/index.ts';
 import type { IRpcCacheRepository, RpcCacheRecord } from '@kyomei/core';
 
 /**

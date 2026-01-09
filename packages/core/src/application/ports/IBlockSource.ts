@@ -1,5 +1,5 @@
-import type { BlockRange, BlockWithLogs } from '../../domain/entities/Block.js';
-import type { LogFilter } from '../../domain/entities/Log.js';
+import type { BlockRange, BlockWithLogs } from '../../domain/entities/Block.ts';
+import type { LogFilter } from '../../domain/entities/Log.ts';
 
 /**
  * Source type identifier

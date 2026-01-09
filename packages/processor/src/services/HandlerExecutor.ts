@@ -4,26 +4,22 @@ import type {
   ICachedRpcClient,
   IEventRepository,
   RawEventRecord,
-} from '@kyomei/core';
-import { EventDecoder } from '@kyomei/core';
+} from "@kyomei/core";
+import { EventDecoder } from "@kyomei/core";
+import type { ContractConfig } from "@kyomei/config";
+import type { Database } from "@kyomei/database";
+import { sql } from "drizzle-orm";
+
+// Import handler types from Kyomei.ts
 import type {
+  HandlerRegistration,
   EventHandler,
-  HandlerContext,
+  EventData,
+  HandlerContext as Context,
   DbContext,
   RpcContext,
-  ContractConfig,
-} from '@kyomei/config';
-import type { Database } from '@kyomei/database';
-import { sql } from 'drizzle-orm';
-
-/**
- * Handler registration
- */
-export interface HandlerRegistration {
-  contractName: string;
-  eventName: string;
-  handler: EventHandler;
-}
+} from "../Kyomei.ts";
+export type { HandlerRegistration };
 
 /**
  * Handler executor options
@@ -66,7 +62,10 @@ export class HandlerExecutor {
     this.eventRepo = options.eventRepository;
     this.checkpointRepo = options.checkpointRepository;
     this.rpcClient = options.rpcClient;
-    this.logger = options.logger.child({ module: 'HandlerExecutor', chain: options.chainName });
+    this.logger = options.logger.child({
+      module: "HandlerExecutor",
+      chain: options.chainName,
+    });
     this.batchSize = options.batchSize ?? 100;
 
     // Register contract ABIs
@@ -78,7 +77,11 @@ export class HandlerExecutor {
   /**
    * Register a handler for an event
    */
-  registerHandler(contractName: string, eventName: string, handler: EventHandler): void {
+  registerHandler(
+    contractName: string,
+    eventName: string,
+    handler: EventHandler
+  ): void {
     const key = `${contractName}:${eventName}`;
     this.handlers.set(key, handler);
     this.logger.debug(`Registered handler: ${key}`);
@@ -104,7 +107,9 @@ export class HandlerExecutor {
       return 0;
     }
 
-    this.logger.info(`Processing events from block ${startBlock} to ${targetBlock}`);
+    this.logger.info(
+      `Processing events from block ${startBlock} to ${targetBlock}`
+    );
 
     let processed = 0;
     let currentBlock = startBlock;
@@ -116,7 +121,7 @@ export class HandlerExecutor {
       const events = await this.eventRepo.query({
         chainId: this.chainId,
         blockRange: { from: currentBlock + 1n, to: endBlock },
-        order: 'asc',
+        order: "asc",
       });
 
       for (const event of events) {
@@ -154,11 +159,11 @@ export class HandlerExecutor {
     // Set block context for RPC caching
     this.rpcClient.setBlockContext(event.blockNumber);
 
-    // Build handler context
-    const context = this.buildContext(event, decoded);
+    // Build handler params
+    const params = this.buildHandlerParams(event, decoded);
 
     try {
-      await handler(context);
+      await handler(params);
       this.logger.trace(`Handled ${handlerKey}`, {
         block: event.blockNumber,
         txHash: event.txHash,
@@ -213,31 +218,39 @@ export class HandlerExecutor {
   }
 
   /**
-   * Build handler context
+   * Build handler params for the new Kyomei.on() API
    */
-  private buildContext(
+  private buildHandlerParams(
     event: RawEventRecord,
-    decoded: { contractName: string; eventName: string; args: Record<string, unknown> }
-  ): HandlerContext {
+    decoded: {
+      contractName: string;
+      eventName: string;
+      args: Record<string, unknown>;
+    }
+  ): { event: EventData; context: Context } {
     return {
-      event: decoded.args,
-      block: {
-        number: event.blockNumber,
-        hash: event.blockHash as `0x${string}`,
-        timestamp: event.blockTimestamp,
+      event: {
+        args: decoded.args,
+        block: {
+          number: event.blockNumber,
+          hash: event.blockHash as `0x${string}`,
+          timestamp: event.blockTimestamp,
+        },
+        transaction: {
+          hash: event.txHash as `0x${string}`,
+          from: "0x0000000000000000000000000000000000000000" as `0x${string}`, // Would need to fetch
+          to: null,
+          index: event.txIndex,
+        },
+        log: {
+          index: event.logIndex,
+          address: event.address as `0x${string}`,
+        },
       },
-      transaction: {
-        hash: event.txHash as `0x${string}`,
-        from: '0x0000000000000000000000000000000000000000' as `0x${string}`, // Would need to fetch
-        to: null,
-        index: event.txIndex,
+      context: {
+        db: this.buildDbContext(),
+        rpc: this.buildRpcContext(),
       },
-      log: {
-        index: event.logIndex,
-        address: event.address as `0x${string}`,
-      },
-      db: this.buildDbContext(),
-      rpc: this.buildRpcContext(),
     };
   }
 
@@ -250,15 +263,22 @@ export class HandlerExecutor {
         values: async (data: object | object[]) => {
           const records = Array.isArray(data) ? data : [data];
           const columns = Object.keys(records[0]);
-          const values = records.map((r) =>
-            `(${columns.map((c) => this.escapeValue((r as any)[c])).join(', ')})`
-          ).join(', ');
+          const values = records
+            .map(
+              (r) =>
+                `(${columns
+                  .map((c) => this.escapeValue((r as any)[c]))
+                  .join(", ")})`
+            )
+            .join(", ");
 
-          await this.db.execute(sql.raw(`
-            INSERT INTO ${this.appSchema}.${table} (${columns.join(', ')})
+          await this.db.execute(
+            sql.raw(`
+            INSERT INTO ${this.appSchema}.${table} (${columns.join(", ")})
             VALUES ${values}
             ON CONFLICT DO NOTHING
-          `));
+          `)
+          );
         },
       }),
       update: (table: string) => ({
@@ -266,16 +286,18 @@ export class HandlerExecutor {
           where: async (condition: object) => {
             const setClause = Object.entries(data)
               .map(([k, v]) => `${k} = ${this.escapeValue(v)}`)
-              .join(', ');
+              .join(", ");
             const whereClause = Object.entries(condition)
               .map(([k, v]) => `${k} = ${this.escapeValue(v)}`)
-              .join(' AND ');
+              .join(" AND ");
 
-            await this.db.execute(sql.raw(`
+            await this.db.execute(
+              sql.raw(`
               UPDATE ${this.appSchema}.${table}
               SET ${setClause}
               WHERE ${whereClause}
-            `));
+            `)
+            );
           },
         }),
       }),
@@ -283,27 +305,31 @@ export class HandlerExecutor {
         where: async (condition: object) => {
           const whereClause = Object.entries(condition)
             .map(([k, v]) => `${k} = ${this.escapeValue(v)}`)
-            .join(' AND ');
+            .join(" AND ");
 
-          await this.db.execute(sql.raw(`
+          await this.db.execute(
+            sql.raw(`
             DELETE FROM ${this.appSchema}.${table}
             WHERE ${whereClause}
-          `));
+          `)
+          );
         },
       }),
       find: <T>(table: string) => ({
         where: async (condition: object): Promise<T | null> => {
           const whereClause = Object.entries(condition)
             .map(([k, v]) => `${k} = ${this.escapeValue(v)}`)
-            .join(' AND ');
+            .join(" AND ");
 
-          const result = await this.db.execute(sql.raw(`
+          const result = await this.db.execute(
+            sql.raw(`
             SELECT * FROM ${this.appSchema}.${table}
             WHERE ${whereClause}
             LIMIT 1
-          `));
+          `)
+          );
 
-          return (result as unknown[])[0] as T ?? null;
+          return ((result as unknown[])[0] as T) ?? null;
         },
         many: async (condition?: object): Promise<T[]> => {
           let query = `SELECT * FROM ${this.appSchema}.${table}`;
@@ -311,7 +337,7 @@ export class HandlerExecutor {
           if (condition && Object.keys(condition).length > 0) {
             const whereClause = Object.entries(condition)
               .map(([k, v]) => `${k} = ${this.escapeValue(v)}`)
-              .join(' AND ');
+              .join(" AND ");
             query += ` WHERE ${whereClause}`;
           }
 
@@ -320,13 +346,15 @@ export class HandlerExecutor {
         },
       }),
       get: async <T>(table: string, id: string | number): Promise<T | null> => {
-        const result = await this.db.execute(sql.raw(`
+        const result = await this.db.execute(
+          sql.raw(`
           SELECT * FROM ${this.appSchema}.${table}
           WHERE id = ${this.escapeValue(id)}
           LIMIT 1
-        `));
+        `)
+        );
 
-        return (result as unknown[])[0] as T ?? null;
+        return ((result as unknown[])[0] as T) ?? null;
       },
     };
   }
@@ -344,7 +372,7 @@ export class HandlerExecutor {
       },
       getBlock: async (blockNumber) => {
         const block = await this.rpcClient.getBlock(blockNumber ?? 0n);
-        if (!block) throw new Error('Block not found');
+        if (!block) throw new Error("Block not found");
         return {
           number: block.number,
           hash: block.hash,
@@ -355,7 +383,7 @@ export class HandlerExecutor {
       },
       getTransactionReceipt: async (hash) => {
         const receipt = await this.rpcClient.getTransactionReceipt(hash);
-        if (!receipt) throw new Error('Receipt not found');
+        if (!receipt) throw new Error("Receipt not found");
         return {
           status: receipt.status,
           gasUsed: receipt.gasUsed,
@@ -369,11 +397,11 @@ export class HandlerExecutor {
    * Escape a value for SQL
    */
   private escapeValue(value: unknown): string {
-    if (value === null || value === undefined) return 'NULL';
-    if (typeof value === 'number') return String(value);
-    if (typeof value === 'bigint') return String(value);
-    if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
-    if (typeof value === 'string') return `'${value.replace(/'/g, "''")}'`;
+    if (value === null || value === undefined) return "NULL";
+    if (typeof value === "number") return String(value);
+    if (typeof value === "bigint") return String(value);
+    if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
+    if (typeof value === "string") return `'${value.replace(/'/g, "''")}'`;
     return `'${JSON.stringify(value).replace(/'/g, "''")}'`;
   }
 }

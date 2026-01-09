@@ -1,6 +1,6 @@
 import { and, eq, gte, lte, inArray, desc, asc, sql } from 'drizzle-orm';
-import type { Database } from '../connection.js';
-import { rawEvents, type NewRawEvent } from '../schemas/sync/index.js';
+import type { Database } from '../connection.ts';
+import { rawEvents, type NewRawEvent } from '../schemas/sync/index.ts';
 import type {
   IEventRepository,
   RawEventRecord,

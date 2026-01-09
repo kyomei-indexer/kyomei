@@ -27,13 +27,13 @@ Kyomei is a two-phase blockchain indexing system inspired by [Ponder](https://po
 
 ### Key Design Decisions
 
-| Decision | Rationale |
-|----------|-----------|
-| Two-phase (Syncer/Processor) | Decouples ingestion from business logic for independent scaling |
-| PostgreSQL as coordinator | Single source of truth, ACID guarantees, no external dependencies |
-| TimescaleDB for events | Time-series optimized storage with compression and retention |
-| Block-range job model | Efficient batching while maintaining ordering guarantees |
-| Cached RPC responses | Enables deterministic replay during reindexing |
+| Decision                     | Rationale                                                         |
+| ---------------------------- | ----------------------------------------------------------------- |
+| Two-phase (Syncer/Processor) | Decouples ingestion from business logic for independent scaling   |
+| PostgreSQL as coordinator    | Single source of truth, ACID guarantees, no external dependencies |
+| TimescaleDB for events       | Time-series optimized storage with compression and retention      |
+| Block-range job model        | Efficient batching while maintaining ordering guarantees          |
+| Cached RPC responses         | Enables deterministic replay during reindexing                    |
 
 ---
 
@@ -126,18 +126,21 @@ kyomei/
 ### Package Details
 
 #### `@kyomei/config`
+
 - Zod-validated configuration schemas
 - Chain, contract, cron, and backup configuration
 - Default values and environment variable support
 - Handler and context type definitions
 
 #### `@kyomei/core`
+
 - **Domain Layer**: Block, Log, Transaction entities
 - **Application Layer**: Ports (IRpcClient, IBlockSource, ILogger)
 - **Infrastructure Layer**: RPC clients, block sources, logger implementation
 - Services: ABI Parser, Event Decoder, Cached RPC Client
 
 #### `@kyomei/database`
+
 - Drizzle ORM schemas for all tables
 - Repository implementations
 - Schema Manager with versioning and migrations
@@ -145,29 +148,36 @@ kyomei/
 - Backup service with S3 support
 
 #### `@kyomei/syncer`
+
 - ChainSyncer: Block-by-block synchronization
 - FactoryWatcher: Dynamic contract discovery
 - ViewCreator: Generate processor views from sync tables
 
 #### `@kyomei/processor`
-- HandlerExecutor: Execute user-defined handlers
-- PonderCompat: Ponder-compatible `ponder.on()` API
+
+- **Kyomei**: Type-safe event handler registration with `kyomei.on()` and `kyomei.onParallel()`
+- **HandlerExecutor**: Execute user-defined handlers with sequential/parallel modes
+- **PonderCompat**: Ponder-compatible `ponder.on()` API
 - Cached RPC context for deterministic replay
 
 #### `@kyomei/cron`
+
 - CronScheduler: Block-based and time-based scheduling
 - Flexible schema targeting (chain or dedicated crons schema)
 
 #### `@kyomei/api`
+
 - Ponder-compatible GraphQL API
 - Auto-generated schema from database tables
 - Pagination, filtering, and custom resolvers
 
 #### `@kyomei/runner`
+
 - ServiceRunner: Orchestrates all services
 - Supports all-in-one or distributed deployment
 
 #### `@kyomei/cli`
+
 - Commands: init, dev, start, migrate, backup, restore
 
 ---
@@ -220,6 +230,7 @@ CronScheduler ──▶ Cron Handlers ──▶ kyomei_crons_v1.* or kyomei_app_
 ### Schema Versioning
 
 Schemas include version suffix for safe migrations:
+
 - `kyomei_sync` - Raw sync data (no versioning, append-only)
 - `kyomei_app_v1` - Application data (versioned)
 - `kyomei_crons_v1` - Cron job data (versioned)
@@ -248,7 +259,7 @@ CREATE TABLE kyomei_sync.raw_events (
 );
 
 -- Hypertable configuration
-SELECT create_hypertable('raw_events', 'block_number', 
+SELECT create_hypertable('raw_events', 'block_number',
   chunk_time_interval => 100000,
   if_not_exists => TRUE
 );
@@ -291,13 +302,13 @@ CREATE TABLE kyomei_sync.factory_children (
 export function createAppSchema(version: string) {
   const appSchema = pgSchema(`kyomei_app_${version}`);
 
-  const pairs = appSchema.table('pairs', {
-    address: varchar('address', { length: 42 }).primaryKey(),
-    token0: varchar('token0', { length: 42 }).notNull(),
-    token1: varchar('token1', { length: 42 }).notNull(),
-    reserve0: numeric('reserve0').default('0'),
-    reserve1: numeric('reserve1').default('0'),
-    createdAtBlock: bigint('created_at_block', { mode: 'bigint' }),
+  const pairs = appSchema.table("pairs", {
+    address: varchar("address", { length: 42 }).primaryKey(),
+    token0: varchar("token0", { length: 42 }).notNull(),
+    token1: varchar("token1", { length: 42 }).notNull(),
+    reserve0: numeric("reserve0").default("0"),
+    reserve1: numeric("reserve1").default("0"),
+    createdAtBlock: bigint("created_at_block", { mode: "bigint" }),
   });
 
   return { pairs };
@@ -311,59 +322,64 @@ export function createAppSchema(version: string) {
 ### `kyomei.config.ts`
 
 ```typescript
-import { defineConfig, factory } from '@kyomei/config';
-import { UniswapV2Factory, UniswapV2Pair } from './abis';
+import { defineConfig, factory } from "@kyomei/config";
+import { UniswapV2Factory, UniswapV2Pair } from "./abis";
 
 export default defineConfig({
   database: {
     connectionString: process.env.DATABASE_URL,
-    schemaVersion: 'v1',
+    schemaVersion: "v1",
   },
 
   chains: {
     mainnet: {
       id: 1,
       source: {
-        type: 'rpc',
-        url: process.env.ETH_RPC_URL,
-        finality: 32,
+        type: "hypersync", // or "rpc", "erpc"
+        url: "https://eth.hypersync.xyz",
       },
       pollingInterval: 2000,
+      // Parallel historical sync configuration
+      sync: {
+        parallelWorkers: 4, // Concurrent sync workers
+        blockRangePerRequest: 10000, // Blocks per HyperSync request
+        blocksPerWorker: 250000, // Blocks per worker chunk
+      },
     },
   },
 
   contracts: {
     UniswapV2Factory: {
-      chain: 'mainnet',
+      chain: "mainnet",
       abi: UniswapV2Factory,
-      address: '0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f',
+      address: "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f",
       startBlock: 10000835n,
     },
     UniswapV2Pair: {
-      chain: 'mainnet',
+      chain: "mainnet",
       abi: UniswapV2Pair,
       address: factory({
-        contract: 'UniswapV2Factory',
-        event: 'PairCreated',
-        parameter: 'pair',
+        contract: "UniswapV2Factory",
+        event: "PairCreated",
+        parameter: "pair",
       }),
     },
   },
 
   crons: {
     priceFetcher: {
-      chain: 'mainnet',
-      trigger: { type: 'time', cron: '*/5 * * * *' },
-      handler: './src/crons/priceFetcher.js',
+      chain: "mainnet",
+      trigger: { type: "time", cron: "*/5 * * * *" },
+      handler: "./src/crons/priceFetcher.js",
     },
   },
 
   backup: {
     enabled: true,
-    schedule: '0 0 * * *',
+    schedule: "0 0 * * *",
     s3: {
-      bucket: 'kyomei-backups',
-      region: 'us-east-1',
+      bucket: "kyomei-backups",
+      region: "us-east-1",
     },
   },
 });
@@ -372,6 +388,59 @@ export default defineConfig({
 ---
 
 ## Features
+
+### Type-Safe Event Handlers (Kyomei API)
+
+Define contracts once and share them between config and handler registration:
+
+```typescript
+// kyomei.config.ts
+import { defineConfig, factory } from "@kyomei/config";
+import { createKyomei } from "@kyomei/processor";
+import { FactoryAbi, PairAbi } from "./src/abis";
+
+// Define contracts once - used by both config and Kyomei
+const UniswapV2Factory = {
+  abi: FactoryAbi,
+  chain: "ethereum",
+  address: "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f",
+  startBlock: 10000835,
+} as const;
+
+const UniswapV2Pair = {
+  abi: PairAbi,
+  chain: "ethereum",
+  address: factory({ ... }),
+  startBlock: 10000835,
+} as const;
+
+// Config uses the contract objects directly
+export default defineConfig({
+  contracts: { UniswapV2Factory, UniswapV2Pair },
+  // ... other config
+});
+
+// Kyomei instance uses the same ABIs - no duplication
+export const kyomei = createKyomei({
+  UniswapV2Factory: { abi: UniswapV2Factory.abi },
+  UniswapV2Pair: { abi: UniswapV2Pair.abi },
+});
+```
+
+```typescript
+// src/handlers/Factory.ts
+import { kyomei } from "../kyomei.config.ts";
+
+// Full type inference for event.args from ABI
+kyomei.on("UniswapV2Factory:PairCreated", async ({ event, context }) => {
+  // event.args.token0, event.args.token1, event.args.pair are typed!
+  await context.db.insert("pairs").values({
+    address: event.args.pair,
+    token0: event.args.token0,
+    token1: event.args.token1,
+  });
+});
+```
 
 ### Multi-Level Logging
 
@@ -389,10 +458,10 @@ kyomei dev -vvvvv   # Trace
 ```typescript
 // Automatically tracks child contracts created by factory
 address: factory({
-  contract: 'UniswapV2Factory',
-  event: 'PairCreated',
-  parameter: 'pair',
-})
+  contract: "UniswapV2Factory",
+  event: "PairCreated",
+  parameter: "pair",
+});
 ```
 
 ### Cached RPC for Deterministic Replay
@@ -403,21 +472,96 @@ const balance = await context.rpc.getBalance(address);
 // Same call during reindex returns cached response
 ```
 
+### Parallel Historical Sync
+
+For faster historical data indexing, Kyomei supports parallel sync workers that split the block range into chunks:
+
+```typescript
+// kyomei.config.ts
+chains: {
+  mainnet: {
+    id: 1,
+    source: {
+      type: 'hypersync', // or 'rpc', 'erpc'
+      url: 'https://eth.hypersync.xyz',
+    },
+    sync: {
+      // Number of parallel workers for historical sync (default: 1)
+      parallelWorkers: 4,
+      // Block range per request (default: 1000 for RPC, 10000 for HyperSync)
+      blockRangePerRequest: 10000,
+      // Total blocks per worker before rotating (default: 100000)
+      blocksPerWorker: 100000,
+    },
+  },
+},
+```
+
+**How it works:**
+
+1. The syncer calculates the total block range: `startBlock` → `currentBlock`
+2. Divides the range into chunks based on `blocksPerWorker`
+3. Spins up `parallelWorkers` concurrent sync tasks
+4. Each worker processes its assigned chunk independently
+5. Checkpoints are updated atomically per-chunk
+6. Once historical sync completes, switches to single-worker live mode
+
+**Example: Syncing 10M blocks with 4 workers**
+
+```
+Worker 1: blocks 0 - 2,499,999
+Worker 2: blocks 2,500,000 - 4,999,999
+Worker 3: blocks 5,000,000 - 7,499,999
+Worker 4: blocks 7,500,000 - 9,999,999
+
+Each worker requests data in batches of `blockRangePerRequest` blocks
+```
+
+### Configurable Block Ranges
+
+Different data sources have different optimal block ranges:
+
+| Source    | Default Range | Recommended Range |
+| --------- | ------------- | ----------------- |
+| RPC       | 1,000         | 500 - 2,000       |
+| eRPC      | 1,000         | 1,000 - 5,000     |
+| HyperSync | 10,000        | 10,000 - 100,000  |
+
+```typescript
+// Contract-level override
+contracts: {
+  UniswapV2Pair: {
+    chain: 'mainnet',
+    abi: UniswapV2Pair,
+    address: factory({ ... }),
+    startBlock: 10000835,
+    // Override block range for this specific contract
+    maxBlockRange: 500, // Lower for high-volume contracts
+  },
+},
+```
+
 ### TimescaleDB Integration
 
 ```typescript
-import { createHypertable, enableCompression } from '@kyomei/database/timescale';
+import {
+  createHypertable,
+  enableCompression,
+} from "@kyomei/database/timescale";
 
 // Create hypertable for time-series data
-await createHypertable(db, schema, 'token_prices', 'fetched_at', {
-  chunkTimeInterval: '1 day',
+await createHypertable(db, schema, "token_prices", "fetched_at", {
+  chunkTimeInterval: "1 day",
 });
 
 // Enable compression
-await enableCompression(db, schema, 'token_prices', 
-  ['token_address'], 
-  ['fetched_at DESC'],
-  { compressAfter: '7 days' }
+await enableCompression(
+  db,
+  schema,
+  "token_prices",
+  ["token_address"],
+  ["fetched_at DESC"],
+  { compressAfter: "7 days" }
 );
 ```
 
@@ -425,16 +569,61 @@ await enableCompression(db, schema, 'token_prices',
 
 ```typescript
 // Handler signature matches Ponder
-export async function handleSwap({ event, context }) {
+kyomei.on("UniswapV2Pair:Swap", async ({ event, context }) => {
   const { args, block, transaction, log } = event;
-  
-  await context.db.insert('swaps').values({
+
+  await context.db.insert("swaps").values({
     pair: log.address,
     amount0In: args.amount0In,
     // ...
   });
-}
+});
 ```
+
+### Parallel Handler Execution
+
+Kyomei supports both sequential and parallel handler execution modes for optimized throughput:
+
+```typescript
+import { kyomei } from "./kyomei.config.ts";
+
+// Sequential (default) - runs one at a time, in order
+// Use for handlers that update shared state or have dependencies
+kyomei.on("UniswapV2Pair:Sync", async ({ event, context }) => {
+  await context.db
+    .update("pairs")
+    .set({
+      reserve0: event.args.reserve0.toString(),
+      reserve1: event.args.reserve1.toString(),
+    })
+    .where({ address: event.log.address });
+});
+
+// Parallel - can run concurrently with other parallel handlers
+// Use for independent insert operations
+kyomei.onParallel("UniswapV2Pair:Swap", async ({ event, context }) => {
+  await context.db.insert("swaps").values({
+    id: `${event.transaction.hash}-${event.log.index}`,
+    pair_address: event.log.address,
+    // ...
+  });
+});
+```
+
+**When to use each mode:**
+
+| Use `on` (sequential)     | Use `onParallel`     |
+| ------------------------- | -------------------- |
+| Updates shared state      | Independent inserts  |
+| Depends on other handlers | Read-only operations |
+| Requires strict ordering  | No dependencies      |
+| Modifies data others read | Isolated writes      |
+
+**Benefits of parallel execution:**
+
+- Higher throughput for independent operations
+- Better CPU utilization during processing
+- Reduced overall indexing time
 
 ---
 
@@ -453,7 +642,7 @@ kyomei start
 # Service 1: Syncer only
 kyomei start --syncer
 
-# Service 2: Processor only  
+# Service 2: Processor only
 kyomei start --processor
 
 # Service 3: API only
@@ -470,12 +659,12 @@ services:
   syncer:
     image: kyomei
     command: kyomei start --syncer
-    
+
   processor:
     image: kyomei
     command: kyomei start --processor
     depends_on: [syncer]
-    
+
   api:
     image: kyomei
     command: kyomei start --api
@@ -550,7 +739,9 @@ kyomei backup --restore <filename>
 - [x] CLI with all commands
 - [x] Backup/restore system
 - [x] Schema versioning and migrations
-- [ ] HyperSync integration
+- [x] HyperSync integration
+- [x] Parallel historical sync with configurable block ranges
+- [x] Parallel handler execution (`on` / `onParallel`)
 - [ ] QuickNode Streams webhook receiver
 - [ ] Full test suite
 - [ ] Documentation site

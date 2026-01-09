@@ -1,6 +1,6 @@
 import type { LogLevel } from '@kyomei/config';
-import type { ILogger, LogContext, ProgressInfo } from '../../application/ports/ILogger.js';
-import { LOG_LEVEL_VALUES } from '../../application/ports/ILogger.js';
+import type { ILogger, LogContext, ProgressInfo } from '../../application/ports/ILogger.ts';
+import { LOG_LEVEL_VALUES } from '../../application/ports/ILogger.ts';
 
 /**
  * ANSI color codes for terminal output

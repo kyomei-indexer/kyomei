@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { program } from 'commander';
-import { devCommand } from './commands/dev.js';
-import { startCommand } from './commands/start.js';
-import { migrateCommand } from './commands/migrate.js';
-import { backupCommand } from './commands/backup.js';
+import { devCommand } from './commands/dev.ts';
+import { startCommand } from './commands/start.ts';
+import { migrateCommand } from './commands/migrate.ts';
+import { backupCommand } from './commands/backup.ts';
 
 program
   .name('kyomei')

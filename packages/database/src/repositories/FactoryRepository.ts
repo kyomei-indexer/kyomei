@@ -1,6 +1,6 @@
 import { and, eq, gte, lte, asc, sql } from 'drizzle-orm';
-import type { Database } from '../connection.js';
-import { factoryChildren } from '../schemas/sync/index.js';
+import type { Database } from '../connection.ts';
+import { factoryChildren } from '../schemas/sync/index.ts';
 import type {
   IFactoryRepository,
   FactoryChildRecord,

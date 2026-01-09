@@ -1,11 +1,11 @@
 // Block exports
-export type { Block, BlockWithLogs, BlockRange } from './Block.js';
-export { createBlock, createBlockRange, blockRangeSize, splitBlockRange } from './Block.js';
+export type { Block, BlockWithLogs, BlockRange } from './Block.ts';
+export { createBlock, createBlockRange, blockRangeSize, splitBlockRange } from './Block.ts';
 
 // Log exports
-export type { Log, RawLog, DecodedLog, LogFilter } from './Log.js';
-export { createLog, createLogFilter, getLogOrderKey, compareLogs } from './Log.js';
+export type { Log, RawLog, DecodedLog, LogFilter } from './Log.ts';
+export { createLog, createLogFilter, getLogOrderKey, compareLogs } from './Log.ts';
 
 // Transaction exports
-export type { Transaction, TransactionType, TransactionReceipt } from './Transaction.js';
-export { createTransaction, isContractCreation, isEIP1559Transaction } from './Transaction.js';
+export type { Transaction, TransactionType, TransactionReceipt } from './Transaction.ts';
+export { createTransaction, isContractCreation, isEIP1559Transaction } from './Transaction.ts';

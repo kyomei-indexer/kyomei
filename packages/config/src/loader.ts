@@ -1,6 +1,6 @@
 import { pathToFileURL } from 'node:url';
-import { kyomeiConfigSchema } from './schema.js';
-import type { KyomeiConfig } from './types.js';
+import { kyomeiConfigSchema } from './schema.ts';
+import type { KyomeiConfig } from './types.ts';
 
 /**
  * Default configuration values
@@ -147,8 +147,11 @@ export async function loadConfig(options?: {
 
 /**
  * Create a type-safe configuration helper
+ *
+ * Uses generics to preserve literal types (especially for ABIs)
+ * so that event args can be properly inferred in handlers.
  */
-export function defineConfig(config: KyomeiConfig): KyomeiConfig {
+export function defineConfig<T extends KyomeiConfig>(config: T): T {
   return config;
 }
 

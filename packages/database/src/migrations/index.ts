@@ -1,11 +1,11 @@
-import type { Database } from '../connection.js';
+import type { Database } from '../connection.ts';
 import { sql } from 'drizzle-orm';
 
 // Import migrations
-import * as m0001 from './0001_init_schemas.js';
-import * as m0002 from './0002_create_sync_tables.js';
-import * as m0003 from './0003_create_app_tables.js';
-import * as m0004 from './0004_create_crons_tables.js';
+import * as m0001 from './0001_init_schemas.ts';
+import * as m0002 from './0002_create_sync_tables.ts';
+import * as m0003 from './0003_create_app_tables.ts';
+import * as m0004 from './0004_create_crons_tables.ts';
 
 /**
  * Migration definition

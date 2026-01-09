@@ -11,8 +11,11 @@ export type {
   FactoryConfig,
   // Contract types
   ContractConfig,
+  EventHandlerMapping,
   // Chain types
   ChainConfig,
+  // Sync types
+  SyncConfig,
   // Cron types
   CronConfig,
   CronTrigger,
@@ -38,10 +41,10 @@ export type {
   EventHandler,
   CronHandler,
   CronHandlerContext,
-} from './types.js';
+} from './types.ts';
 
 // Helper functions
-export { factory, isFactoryConfig } from './types.js';
+export { factory, isFactoryConfig } from './types.ts';
 
 // Schema exports
 export {
@@ -55,11 +58,12 @@ export {
   databaseConfigSchema,
   loggingConfigSchema,
   apiConfigSchema,
-} from './schema.js';
-export type { KyomeiConfigInput, KyomeiConfigOutput } from './schema.js';
+  syncConfigSchema,
+} from './schema.ts';
+export type { KyomeiConfigInput, KyomeiConfigOutput } from './schema.ts';
 
 // Loader exports
-export { loadConfig, defineConfig, defineConfigWithEnv } from './loader.js';
+export { loadConfig, defineConfig, defineConfigWithEnv } from './loader.ts';
 
 // Default exports
 export {
@@ -69,5 +73,7 @@ export {
   DEFAULT_BACKUP_CONFIG,
   DEFAULT_API_CONFIG,
   DEFAULT_BLOCK_RANGES,
+  DEFAULT_SYNC_CONFIG,
+  RECOMMENDED_SYNC_CONFIGS,
   COMMON_CHAINS,
-} from './defaults.js';
+} from './defaults.ts';

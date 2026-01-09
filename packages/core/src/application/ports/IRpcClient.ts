@@ -1,7 +1,7 @@
 import type { Abi } from 'viem';
-import type { Block } from '../../domain/entities/Block.js';
-import type { Log, LogFilter } from '../../domain/entities/Log.js';
-import type { Transaction, TransactionReceipt } from '../../domain/entities/Transaction.js';
+import type { Block } from '../../domain/entities/Block.ts';
+import type { Log, LogFilter } from '../../domain/entities/Log.ts';
+import type { Transaction, TransactionReceipt } from '../../domain/entities/Transaction.ts';
 
 /**
  * RPC call parameters

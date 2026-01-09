@@ -1,9 +1,9 @@
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { sql } from 'drizzle-orm';
 import postgres from 'postgres';
-import * as syncSchema from './schemas/sync/index.js';
-import * as appSchema from './schemas/app/index.js';
-import * as cronsSchema from './schemas/crons/index.js';
+import * as syncSchema from './schemas/sync/index.ts';
+import * as appSchema from './schemas/app/index.ts';
+import * as cronsSchema from './schemas/crons/index.ts';
 
 /**
  * Combined schema for type safety

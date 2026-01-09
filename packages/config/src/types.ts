@@ -33,7 +33,10 @@ export interface ErpcSourceConfig {
  */
 export interface HyperSyncSourceConfig {
   type: 'hypersync';
-  url: string;
+  /** HyperSync endpoint URL (optional, defaults based on chainId) */
+  url?: string;
+  /** Fallback RPC URL for contract reads (HyperSync only provides logs/blocks) */
+  fallbackRpc?: string;
 }
 
 /**
@@ -104,6 +107,12 @@ export function isFactoryConfig(config: AddressConfig): config is FactoryConfig 
 // ============================================================================
 
 /**
+ * Event handler mapping
+ * Maps event names to handler functions or module paths
+ */
+export type EventHandlerMapping = Record<string, EventHandler | string>;
+
+/**
  * Contract configuration for indexing
  */
 export interface ContractConfig {
@@ -120,6 +129,56 @@ export interface ContractConfig {
   endBlock?: number;
   /** Maximum block range per request (default: 1000) */
   maxBlockRange?: number;
+  /**
+   * Event handlers for this contract
+   * Can be inline functions or paths to handler modules
+   *
+   * @example
+   * // Inline handler
+   * handlers: {
+   *   Transfer: async ({ event, db }) => { ... }
+   * }
+   *
+   * @example
+   * // Module path (resolved relative to config file)
+   * handlers: {
+   *   Transfer: './handlers/token.js#handleTransfer'
+   * }
+   */
+  handlers?: EventHandlerMapping;
+}
+
+// ============================================================================
+// Sync Configuration
+// ============================================================================
+
+/**
+ * Parallel sync configuration for historical data
+ */
+export interface SyncConfig {
+  /**
+   * Number of parallel workers for historical sync
+   * Each worker processes a distinct chunk of blocks
+   * @default 1
+   */
+  parallelWorkers?: number;
+  /**
+   * Number of blocks to request per RPC/HyperSync call
+   * - RPC default: 1000
+   * - HyperSync default: 10000
+   */
+  blockRangePerRequest?: number;
+  /**
+   * Total blocks assigned to each worker before completion
+   * Used to divide historical range among parallel workers
+   * @default 100000
+   */
+  blocksPerWorker?: number;
+  /**
+   * Batch size for storing events to database
+   * @default 1000
+   */
+  eventBatchSize?: number;
 }
 
 // ============================================================================
@@ -138,6 +197,8 @@ export interface ChainConfig {
   finalityBlocks?: number;
   /** Polling interval in milliseconds (default: 2000) */
   pollingInterval?: number;
+  /** Sync configuration for parallel historical indexing */
+  sync?: SyncConfig;
 }
 
 // ============================================================================

@@ -1,4 +1,4 @@
-export { cronsSchema, cronJobs, cronExecutions, cronCheckpoints } from './cronJobs.js';
+export { cronsSchema, cronJobs, cronExecutions, cronCheckpoints } from './cronJobs.ts';
 export type {
   CronJob,
   NewCronJob,
@@ -6,4 +6,4 @@ export type {
   NewCronExecution,
   CronCheckpoint,
   NewCronCheckpoint,
-} from './cronJobs.js';
+} from './cronJobs.ts';

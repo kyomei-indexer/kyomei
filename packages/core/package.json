@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@kyomei/config": "workspace:*",
+    "@envio-dev/hypersync-client": "^0.7.2",
     "viem": "^2.21.54"
   },
   "devDependencies": {

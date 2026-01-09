@@ -1,5 +1,5 @@
-import type { Log } from '../../domain/entities/Log.js';
-import type { BlockRange } from '../../domain/entities/Block.js';
+import type { Log } from '../../domain/entities/Log.ts';
+import type { BlockRange } from '../../domain/entities/Block.ts';
 
 /**
  * Raw event record for storage

@@ -1,5 +1,5 @@
 // Block source ports
-export type { IBlockSource, IBlockSourceFactory, SourceType, BlockHandler, Unsubscribe } from './IBlockSource.js';
+export type { IBlockSource, IBlockSourceFactory, SourceType, BlockHandler, Unsubscribe } from './IBlockSource.ts';
 
 // RPC client ports
 export type {
@@ -8,7 +8,7 @@ export type {
   IRpcClientFactory,
   RpcCallParams,
   ReadContractParams,
-} from './IRpcClient.js';
+} from './IRpcClient.ts';
 
 // Logger ports
 export type {
@@ -16,15 +16,15 @@ export type {
   ILoggerFactory,
   LogContext,
   ProgressInfo,
-} from './ILogger.js';
-export { LOG_LEVEL_VALUES, verbosityToLogLevel } from './ILogger.js';
+} from './ILogger.ts';
+export { LOG_LEVEL_VALUES, verbosityToLogLevel } from './ILogger.ts';
 
 // Event repository ports
 export type {
   IEventRepository,
   RawEventRecord,
   EventQueryOptions,
-} from './IEventRepository.js';
+} from './IEventRepository.ts';
 
 // Checkpoint repository ports
 export type {
@@ -32,17 +32,17 @@ export type {
   IProcessCheckpointRepository,
   SyncCheckpoint,
   ProcessCheckpoint,
-} from './ICheckpointRepository.js';
+} from './ICheckpointRepository.ts';
 
 // RPC cache repository ports
 export type {
   IRpcCacheRepository,
   RpcCacheRecord,
-} from './IRpcCacheRepository.js';
+} from './IRpcCacheRepository.ts';
 
 // Factory repository ports
 export type {
   IFactoryRepository,
   FactoryChildRecord,
   FactoryChildQueryOptions,
-} from './IFactoryRepository.js';
+} from './IFactoryRepository.ts';

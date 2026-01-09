@@ -1,4 +1,4 @@
-export { EventRepository } from './EventRepository.js';
-export { SyncCheckpointRepository, ProcessCheckpointRepository } from './CheckpointRepository.js';
-export { RpcCacheRepository } from './RpcCacheRepository.js';
-export { FactoryRepository } from './FactoryRepository.js';
+export { EventRepository } from './EventRepository.ts';
+export { SyncCheckpointRepository, ProcessCheckpointRepository } from './CheckpointRepository.ts';
+export { RpcCacheRepository } from './RpcCacheRepository.ts';
+export { FactoryRepository } from './FactoryRepository.ts';

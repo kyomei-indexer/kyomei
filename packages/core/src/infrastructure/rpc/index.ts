@@ -1,4 +1,4 @@
-export { RpcClient } from './RpcClient.js';
-export { RpcBlockSource } from './RpcBlockSource.js';
-export { ErpcBlockSource } from './ErpcBlockSource.js';
-export { CachedRpcClient } from './CachedRpcClient.js';
+export { RpcClient } from './RpcClient.ts';
+export { RpcBlockSource } from './RpcBlockSource.ts';
+export { ErpcBlockSource } from './ErpcBlockSource.ts';
+export { CachedRpcClient } from './CachedRpcClient.ts';

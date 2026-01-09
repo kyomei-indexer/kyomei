@@ -1,6 +1,6 @@
-import type { Abi, AbiEvent } from 'viem';
-import type { EventHandler, ContractConfig } from '@kyomei/config';
-import type { HandlerRegistration } from './HandlerExecutor.js';
+import type { Abi, AbiEvent } from "viem";
+import type { ContractConfig } from "@kyomei/config";
+import type { HandlerRegistration, EventHandler } from "../Kyomei.ts";
 
 /**
  * Ponder-compatible handler builder
@@ -42,7 +42,7 @@ export class PonderCompat {
 
     // Validate event exists in ABI
     const eventExists = contract.abi.some(
-      (item) => item.type === 'event' && (item as AbiEvent).name === eventName
+      (item) => item.type === "event" && (item as AbiEvent).name === eventName
     );
     if (!eventExists) {
       throw new Error(`Event ${eventName} not found in ${contractName} ABI`);
@@ -52,6 +52,7 @@ export class PonderCompat {
       contractName,
       eventName,
       handler: handler as EventHandler,
+      mode: "sequential",
     });
   }
 
@@ -73,7 +74,7 @@ export class PonderCompat {
    * Parse event selector (ContractName:EventName)
    */
   private parseEventSelector(selector: string): [string, string] {
-    const parts = selector.split(':');
+    const parts = selector.split(":");
     if (parts.length !== 2) {
       throw new Error(
         `Invalid event selector: ${selector}. Expected format: ContractName:EventName`
@@ -86,7 +87,9 @@ export class PonderCompat {
 /**
  * Create a Ponder-compatible handler builder
  */
-export function createPonder(contracts: Array<ContractConfig & { name: string }>): PonderCompat {
+export function createPonder(
+  contracts: Array<ContractConfig & { name: string }>
+): PonderCompat {
   const ponder = new PonderCompat();
   ponder.registerContracts(contracts);
   return ponder;
@@ -96,7 +99,10 @@ export function createPonder(contracts: Array<ContractConfig & { name: string }>
  * Type helper for event handler context
  * Similar to Ponder's event types
  */
-export interface TypedEventContext<TAbi extends Abi, TEventName extends string> {
+export interface TypedEventContext<
+  TAbi extends Abi,
+  TEventName extends string
+> {
   event: ExtractEventArgs<TAbi, TEventName>;
   block: {
     number: bigint;
@@ -119,4 +125,7 @@ export interface TypedEventContext<TAbi extends Abi, TEventName extends string> 
  * Extract event args from ABI
  * Simplified type to avoid complex indexed access issues
  */
-type ExtractEventArgs<_TAbi extends Abi, _TEventName extends string> = Record<string, unknown>;
+type ExtractEventArgs<_TAbi extends Abi, _TEventName extends string> = Record<
+  string,
+  unknown
+>;

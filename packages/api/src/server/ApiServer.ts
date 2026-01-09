@@ -2,7 +2,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import mercurius, { type IResolvers } from "mercurius";
 import type { Database } from "@kyomei/database";
 import type { ILogger } from "@kyomei/core";
-import { SchemaGenerator } from "../graphql/SchemaGenerator.js";
+import { SchemaGenerator } from "../graphql/SchemaGenerator.ts";
 import { sql } from "drizzle-orm";
 
 /**

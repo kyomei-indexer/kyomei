@@ -19,7 +19,8 @@ const erpcSourceSchema = z.object({
 
 const hyperSyncSourceSchema = z.object({
   type: z.literal('hypersync'),
-  url: z.string().url(),
+  url: z.string().url().optional(),
+  fallbackRpc: z.string().url().optional(),
 });
 
 const streamSourceSchema = z.object({
@@ -63,6 +64,21 @@ const addressConfigSchema = z.union([
 ]);
 
 // ============================================================================
+// Sync Configuration Schema
+// ============================================================================
+
+const syncConfigSchema = z.object({
+  /** Number of parallel workers for historical sync (default: 1) */
+  parallelWorkers: z.number().positive().int().max(32).optional(),
+  /** Blocks per request to RPC/HyperSync (default: 1000 for RPC, 10000 for HyperSync) */
+  blockRangePerRequest: z.number().positive().int().max(1000000).optional(),
+  /** Total blocks per worker chunk (default: 100000) */
+  blocksPerWorker: z.number().positive().int().optional(),
+  /** Batch size for event storage (default: 1000) */
+  eventBatchSize: z.number().positive().int().optional(),
+});
+
+// ============================================================================
 // Chain Configuration Schema
 // ============================================================================
 
@@ -71,6 +87,7 @@ const chainConfigSchema = z.object({
   source: sourceConfigSchema,
   finalityBlocks: z.number().positive().int().optional(),
   pollingInterval: z.number().positive().int().optional(),
+  sync: syncConfigSchema.optional(),
 });
 
 // ============================================================================
@@ -242,4 +259,5 @@ export {
   databaseConfigSchema,
   loggingConfigSchema,
   apiConfigSchema,
+  syncConfigSchema,
 };

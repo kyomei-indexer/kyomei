@@ -10,12 +10,12 @@ import {
   boolean,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import type { Database } from "../connection.js";
+import type { Database } from "../connection.ts";
 import {
   createHypertable,
   enableCompression,
   setRetentionPolicy,
-} from "./hypertable.js";
+} from "./hypertable.ts";
 
 // ============================================================================
 // Types

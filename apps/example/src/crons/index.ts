@@ -7,6 +7,6 @@
  * - priceFetcher: Fetches token prices every 5 minutes from CoinGecko
  */
 
-export { hourlyStats } from './hourlyStats.js';
-export { blockSnapshots } from './blockSnapshots.js';
-export { priceFetcher } from './priceFetcher.js';
+export { hourlyStats } from './hourlyStats.ts';
+export { blockSnapshots } from './blockSnapshots.ts';
+export { priceFetcher } from './priceFetcher.ts';

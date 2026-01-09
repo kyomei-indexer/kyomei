@@ -141,6 +141,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@envio-dev/hypersync-client':
+        specifier: ^0.7.2
+        version: 0.7.2
       '@kyomei/config':
         specifier: workspace:*
         version: link:../config
@@ -234,6 +237,9 @@ importers:
       '@kyomei/database':
         specifier: workspace:*
         version: link:../database
+      abitype:
+        specifier: ^1.0.8
+        version: 1.2.3(typescript@5.9.3)(zod@3.25.76)
       drizzle-orm:
         specifier: ^0.39.3
         version: 0.39.3(postgres@3.4.8)
@@ -576,6 +582,52 @@ packages:
 
   '@drizzle-team/brocli@0.10.2':
     resolution: {integrity: sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w==}
+
+  '@envio-dev/hypersync-client-darwin-arm64@0.7.2':
+    resolution: {integrity: sha512-IRIjXWYiDLMUXymi5xDTqunzuaqwacsc9WHT4+OWuuvbWrRlIvXEMMi8HsBtEPNn7471pvpC2EeqW9qcPK2ekQ==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@envio-dev/hypersync-client-darwin-x64@0.7.2':
+    resolution: {integrity: sha512-OkthiAAvxdYnBDg3uGPaC7w035+4RsLVgzoNDefqfG0jkc1pYbFbmiW8JwZBExqVJArO0xi9kr+DvQbuE918ww==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [darwin]
+
+  '@envio-dev/hypersync-client-linux-arm64-gnu@0.7.2':
+    resolution: {integrity: sha512-g6xcaHjWHCAupL2uwwlwso86Mvu3cv5U+sGkFycX61I8ZeED9XKHBm9UQt1nSeI7eTHvgZdlP+aO92NVI9cjyg==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [linux]
+
+  '@envio-dev/hypersync-client-linux-x64-gnu@0.7.2':
+    resolution: {integrity: sha512-8SHhKQzu5hygw803MlvMZCZ093HKwGZXTunzzQN32ZB1xZu4XCI/7+0t/tMPBy8uOtMOjktESXlOida+3Vuzrg==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [linux]
+
+  '@envio-dev/hypersync-client-linux-x64-musl@0.7.2':
+    resolution: {integrity: sha512-G/Mc/D8GjPpETEq95smz75irns1ykp+w4lCpA+vS6HCzxP+P59NOj/tij8JDKBFL+q8S0bNBmv38UAIfi1QypA==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [linux]
+
+  '@envio-dev/hypersync-client-win32-arm64-msvc@0.7.2':
+    resolution: {integrity: sha512-biKhRZg9vO6DoPRPsODgavPwYScowIeWbZnOfZ8AhG6mGZqNZ9lOseJyAA1RqjOVDWmVUMEWdd6awexyc0eWSQ==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [win32]
+
+  '@envio-dev/hypersync-client-win32-x64-msvc@0.7.2':
+    resolution: {integrity: sha512-TP/lLS57UaVs0ZGPx3VW+S9EJ8xE24QXAL9fqHHC3Vbqw3osSdkrzfKZIDOXVAf5aGs+4aBo0glBfrY7SlTYQQ==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [win32]
+
+  '@envio-dev/hypersync-client@0.7.2':
+    resolution: {integrity: sha512-alx/hGpVqPQKWHLpepC3po6AxJ3GqV2HxdCIHE9v/SS9LQHxk9zbkqMqrTw4tOuY+XKl7AP7CecT46bC80c25Q==}
+    engines: {node: '>= 10'}
 
   '@esbuild-kit/core-utils@3.3.2':
     resolution: {integrity: sha512-sPRAnw9CdSsRmEtnsl2WXWdyquogVpB3yZ3dgwJfe8zrOzTsV7cJvmwrKVa+0ma5BoiGJ+BoqkMvawbayKUsqQ==}
@@ -3758,6 +3810,37 @@ snapshots:
     optional: true
 
   '@drizzle-team/brocli@0.10.2': {}
+
+  '@envio-dev/hypersync-client-darwin-arm64@0.7.2':
+    optional: true
+
+  '@envio-dev/hypersync-client-darwin-x64@0.7.2':
+    optional: true
+
+  '@envio-dev/hypersync-client-linux-arm64-gnu@0.7.2':
+    optional: true
+
+  '@envio-dev/hypersync-client-linux-x64-gnu@0.7.2':
+    optional: true
+
+  '@envio-dev/hypersync-client-linux-x64-musl@0.7.2':
+    optional: true
+
+  '@envio-dev/hypersync-client-win32-arm64-msvc@0.7.2':
+    optional: true
+
+  '@envio-dev/hypersync-client-win32-x64-msvc@0.7.2':
+    optional: true
+
+  '@envio-dev/hypersync-client@0.7.2':
+    optionalDependencies:
+      '@envio-dev/hypersync-client-darwin-arm64': 0.7.2
+      '@envio-dev/hypersync-client-darwin-x64': 0.7.2
+      '@envio-dev/hypersync-client-linux-arm64-gnu': 0.7.2
+      '@envio-dev/hypersync-client-linux-x64-gnu': 0.7.2
+      '@envio-dev/hypersync-client-linux-x64-musl': 0.7.2
+      '@envio-dev/hypersync-client-win32-arm64-msvc': 0.7.2
+      '@envio-dev/hypersync-client-win32-x64-msvc': 0.7.2
 
   '@esbuild-kit/core-utils@3.3.2':
     dependencies:

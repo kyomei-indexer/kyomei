@@ -1,7 +1,7 @@
 import { eq, and, sql } from 'drizzle-orm';
-import type { Database } from '../connection.js';
-import { syncCheckpoints } from '../schemas/sync/index.js';
-import { processCheckpoints } from '../schemas/app/index.js';
+import type { Database } from '../connection.ts';
+import { syncCheckpoints } from '../schemas/sync/index.ts';
+import { processCheckpoints } from '../schemas/app/index.ts';
 import type {
   ISyncCheckpointRepository,
   IProcessCheckpointRepository,

@@ -1,11 +1,11 @@
-export { syncSchema, rawEvents } from './rawEvents.js';
-export type { RawEvent, NewRawEvent } from './rawEvents.js';
+export { syncSchema, rawEvents } from './rawEvents.ts';
+export type { RawEvent, NewRawEvent } from './rawEvents.ts';
 
-export { syncCheckpoints } from './syncCheckpoints.js';
-export type { SyncCheckpoint, NewSyncCheckpoint } from './syncCheckpoints.js';
+export { syncCheckpoints } from './syncCheckpoints.ts';
+export type { SyncCheckpoint, NewSyncCheckpoint } from './syncCheckpoints.ts';
 
-export { factoryChildren } from './factoryChildren.js';
-export type { FactoryChild, NewFactoryChild } from './factoryChildren.js';
+export { factoryChildren } from './factoryChildren.ts';
+export type { FactoryChild, NewFactoryChild } from './factoryChildren.ts';
 
-export { rpcCache } from './rpcCache.js';
-export type { RpcCacheEntry, NewRpcCacheEntry } from './rpcCache.js';
+export { rpcCache } from './rpcCache.ts';
+export type { RpcCacheEntry, NewRpcCacheEntry } from './rpcCache.ts';

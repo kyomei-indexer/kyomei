@@ -1,2 +1,2 @@
-export { appSchema, processCheckpoints } from './processCheckpoints.js';
-export type { ProcessCheckpoint, NewProcessCheckpoint } from './processCheckpoints.js';
+export { appSchema, processCheckpoints } from './processCheckpoints.ts';
+export type { ProcessCheckpoint, NewProcessCheckpoint } from './processCheckpoints.ts';

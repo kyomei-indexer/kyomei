@@ -1,5 +1,5 @@
 import { integer, bigint, varchar, timestamp, primaryKey } from 'drizzle-orm/pg-core';
-import { syncSchema } from './rawEvents.js';
+import { syncSchema } from './rawEvents.ts';
 
 /**
  * Sync checkpoints table

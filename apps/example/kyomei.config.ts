@@ -1,6 +1,41 @@
 import { defineConfig, factory } from "@kyomei/config";
-import { UniswapV2FactoryAbi, UniswapV2PairAbi } from "./src/abis/index.js";
+import { createKyomei } from "@kyomei/processor";
+import { UniswapV2FactoryAbi, UniswapV2PairAbi } from "./src/abis/index.ts";
 
+/**
+ * Contract ABIs with full type information for event inference.
+ * Used by both the config and the Kyomei handler registration.
+ */
+const UniswapV2Factory = {
+  abi: UniswapV2FactoryAbi,
+  chain: "ethereum",
+  address: "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f",
+  startBlock: 10000835,
+} as const;
+
+const UniswapV2Pair = {
+  abi: UniswapV2PairAbi,
+  chain: "ethereum",
+  address: factory({
+    address: "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f",
+    event: {
+      type: "event",
+      name: "PairCreated",
+      inputs: [
+        { type: "address", name: "token0", indexed: true },
+        { type: "address", name: "token1", indexed: true },
+        { type: "address", name: "pair", indexed: false },
+        { type: "uint256", name: "pairIndex", indexed: false },
+      ],
+    },
+    parameter: "pair",
+  }),
+  startBlock: 10000835,
+} as const;
+
+/**
+ * Kyomei Configuration
+ */
 export default defineConfig({
   database: {
     connectionString:
@@ -24,107 +59,106 @@ export default defineConfig({
     ethereum: {
       id: 1,
       source: {
-        type: 'erpc',
-        url: process.env.ERPC_URL ?? 'http://localhost:4000',
-        finality: 'finalized',
+        type: "erpc",
+        url: process.env.ERPC_URL ?? "http://localhost:4000",
+        finality: "finalized",
       },
       pollingInterval: 12000,
+      /**
+       * Sync configuration for parallel historical indexing
+       * Splits the block range into chunks and processes them concurrently
+       */
+      sync: {
+        parallelWorkers: 4,
+        blockRangePerRequest: 2000,
+        blocksPerWorker: 250000,
+        eventBatchSize: 1000,
+      },
     },
   },
 
   contracts: {
-    UniswapV2Factory: {
-      abi: UniswapV2FactoryAbi,
-      chain: 'ethereum',
-      address: '0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f',
-      startBlock: 10000835,
-    },
-
-    UniswapV2Pair: {
-      abi: UniswapV2PairAbi,
-      chain: 'ethereum',
-      // Factory pattern - dynamically track pairs
-      address: factory({
-        address: '0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f',
-        event: {
-          type: 'event',
-          name: 'PairCreated',
-          inputs: [
-            { type: 'address', name: 'token0', indexed: true },
-            { type: 'address', name: 'token1', indexed: true },
-            { type: 'address', name: 'pair', indexed: false },
-            { type: 'uint256', name: '', indexed: false },
-          ],
-        },
-        parameter: 'pair',
-      }),
-      startBlock: 10000835,
-    },
+    UniswapV2Factory,
+    UniswapV2Pair,
   },
 
   crons: [
     {
-      name: 'hourly-stats',
-      chain: 'ethereum',
+      name: "hourly-stats",
+      chain: "ethereum",
       trigger: {
-        type: 'time',
-        cron: '0 * * * *', // Every hour
+        type: "time",
+        cron: "0 * * * *",
       },
-      handler: './src/crons/hourlyStats.js',
-      schema: { type: 'dedicated' },
+      handler: "./src/crons/hourlyStats.js",
+      schema: { type: "dedicated" },
     },
     {
-      name: 'block-snapshots',
-      chain: 'ethereum',
+      name: "block-snapshots",
+      chain: "ethereum",
       trigger: {
-        type: 'block',
-        interval: 100, // Every 100 blocks
+        type: "block",
+        interval: 100,
       },
-      handler: './src/crons/blockSnapshots.js',
-      schema: { type: 'chain', chain: 'ethereum' },
+      handler: "./src/crons/blockSnapshots.js",
+      schema: { type: "chain", chain: "ethereum" },
     },
     {
-      name: 'price-fetcher',
-      chain: 'ethereum',
+      name: "price-fetcher",
+      chain: "ethereum",
       trigger: {
-        type: 'time',
-        cron: '*/5 * * * *', // Every 5 minutes
+        type: "time",
+        cron: "*/5 * * * *",
       },
-      handler: './src/crons/priceFetcher.js',
-      schema: { type: 'dedicated' },
+      handler: "./src/crons/priceFetcher.js",
+      schema: { type: "dedicated" },
       enabled: true,
     },
   ],
 
   backup: {
     storage: {
-      endpoint: process.env.S3_ENDPOINT ?? 'http://localhost:4566',
-      bucket: 'kyomei-backups',
-      region: 'us-east-1',
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? 'test',
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? 'test',
+      endpoint: process.env.S3_ENDPOINT ?? "http://localhost:4566",
+      bucket: "kyomei-backups",
+      region: "us-east-1",
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? "test",
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? "test",
       forcePathStyle: true,
     },
     schemas: ["kyomei_sync", "kyomei_app_v1", "kyomei_crons_v1"],
     schedule: {
       enabled: true,
-      cron: '0 0 * * *', // Daily at midnight
+      cron: "0 0 * * *",
       retentionDays: 7,
     },
   },
 
   logging: {
-    level: 'info',
+    level: "info",
     timestamps: true,
     progress: true,
   },
 
   api: {
     port: 42069,
-    host: '0.0.0.0',
+    host: "0.0.0.0",
     graphql: {
       enabled: true,
-      path: '/graphql',
+      path: "/graphql",
     },
   },
+});
+
+/**
+ * Kyomei instance for type-safe handler registration.
+ *
+ * Uses the same ABIs as the config above - no duplication.
+ *
+ * Import this in handlers:
+ *   import { kyomei } from "../../kyomei.config.ts";
+ *   kyomei.on("UniswapV2Factory:PairCreated", handler);
+ */
+export const kyomei = createKyomei({
+  UniswapV2Factory: { abi: UniswapV2Factory.abi },
+  UniswapV2Pair: { abi: UniswapV2Pair.abi },
 });

@@ -10,7 +10,7 @@ export {
   queryLatest,
   queryTimeRangeStats,
   queryOHLC,
-} from "./hypertable.js";
+} from "./hypertable.ts";
 
 export type {
   HypertableStats,
@@ -19,7 +19,7 @@ export type {
   AggregateFunction,
   TimeBucketQueryOptions,
   OHLCResult,
-} from "./hypertable.js";
+} from "./hypertable.ts";
 
 // Table builder
 export {
@@ -27,11 +27,11 @@ export {
   initializeHypertable,
   generateHypertableSQL,
   createHypertableFromDef,
-} from "./builder.js";
+} from "./builder.ts";
 
 export type {
   ColumnType,
   ColumnDef,
   HypertableConfig,
   TimescaleTableDef,
-} from "./builder.js";
+} from "./builder.ts";

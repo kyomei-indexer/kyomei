@@ -1,4 +1,4 @@
-import type { BackupConfig, ChainConfig, DatabaseConfig, LoggingConfig, SourceConfig } from './types.js';
+import type { BackupConfig, ChainConfig, DatabaseConfig, LoggingConfig, SourceConfig, SyncConfig } from './types.ts';
 
 // ============================================================================
 // Default Database Configuration
@@ -146,4 +146,44 @@ export const DEFAULT_BLOCK_RANGES: Record<SourceConfig['type'], number> = {
   erpc: 2000, // eRPC can handle larger ranges with caching
   hypersync: 10000, // HyperSync is optimized for large ranges
   stream: 1, // Streams process block-by-block
+};
+
+// ============================================================================
+// Default Sync Configuration
+// ============================================================================
+
+/**
+ * Default configuration for parallel historical sync
+ */
+export const DEFAULT_SYNC_CONFIG: Required<SyncConfig> = {
+  parallelWorkers: 1, // Single worker by default for simplicity
+  blockRangePerRequest: 1000, // Overridden per-source in ChainSyncer
+  blocksPerWorker: 100000, // 100k blocks per worker chunk
+  eventBatchSize: 1000, // Events to batch before DB insert
+};
+
+/**
+ * Recommended sync configs per source type for optimal performance
+ */
+export const RECOMMENDED_SYNC_CONFIGS: Record<SourceConfig['type'], Partial<SyncConfig>> = {
+  rpc: {
+    parallelWorkers: 2,
+    blockRangePerRequest: 1000,
+    blocksPerWorker: 50000,
+  },
+  erpc: {
+    parallelWorkers: 4,
+    blockRangePerRequest: 2000,
+    blocksPerWorker: 100000,
+  },
+  hypersync: {
+    parallelWorkers: 8,
+    blockRangePerRequest: 10000,
+    blocksPerWorker: 500000,
+  },
+  stream: {
+    parallelWorkers: 1,
+    blockRangePerRequest: 1,
+    blocksPerWorker: 1,
+  },
 };

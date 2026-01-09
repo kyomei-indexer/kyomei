@@ -1,6 +1,6 @@
-import type { Database } from '../connection.js';
+import type { Database } from '../connection.ts';
 import { sql } from 'drizzle-orm';
-import { createHypertable, enableCompression } from '../timescale/hypertable.js';
+import { createHypertable, enableCompression } from '../timescale/hypertable.ts';
 
 /**
  * Migration: Create sync schema tables

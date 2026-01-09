@@ -1,12 +1,12 @@
 // Domain exports
-export * from './domain/entities/index.js';
-export * from './domain/value-objects/index.js';
+export * from './domain/entities/index.ts';
+export * from './domain/value-objects/index.ts';
 
 // Application ports
-export * from './application/ports/index.js';
+export * from './application/ports/index.ts';
 
 // Application services
-export * from './application/services/index.js';
+export * from './application/services/index.ts';
 
 // Infrastructure
-export * from './infrastructure/index.js';
+export * from './infrastructure/index.ts';

@@ -1,18 +1,18 @@
 import { type PublicClient, createPublicClient, http } from "viem";
-import type { Block } from "../../domain/entities/Block.js";
-import { createBlock } from "../../domain/entities/Block.js";
-import type { Log, LogFilter } from "../../domain/entities/Log.js";
-import { createLog } from "../../domain/entities/Log.js";
+import type { Block } from "../../domain/entities/Block.ts";
+import { createBlock } from "../../domain/entities/Block.ts";
+import type { Log, LogFilter } from "../../domain/entities/Log.ts";
+import { createLog } from "../../domain/entities/Log.ts";
 import type {
   Transaction,
   TransactionReceipt,
-} from "../../domain/entities/Transaction.js";
-import { createTransaction } from "../../domain/entities/Transaction.js";
+} from "../../domain/entities/Transaction.ts";
+import { createTransaction } from "../../domain/entities/Transaction.ts";
 import type {
   IRpcClient,
   ReadContractParams,
   RpcCallParams,
-} from "../../application/ports/IRpcClient.js";
+} from "../../application/ports/IRpcClient.ts";
 
 /**
  * RPC client implementation using viem

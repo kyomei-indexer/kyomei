@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import type { PgTable, TableConfig } from "drizzle-orm/pg-core";
-import type { Database } from "../connection.js";
+import type { Database } from "../connection.ts";
 
 /**
  * Schema metadata stored in the database
