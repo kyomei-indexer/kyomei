@@ -20,6 +20,8 @@ const erpcSourceSchema = z.object({
 const hyperSyncSourceSchema = z.object({
   type: z.literal('hypersync'),
   url: z.string().url().optional(),
+  /** API token for HyperSync (optional for public endpoints) */
+  apiToken: z.string().optional(),
   fallbackRpc: z.string().url().optional(),
 });
 

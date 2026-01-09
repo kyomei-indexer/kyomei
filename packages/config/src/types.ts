@@ -35,6 +35,8 @@ export interface HyperSyncSourceConfig {
   type: 'hypersync';
   /** HyperSync endpoint URL (optional, defaults based on chainId) */
   url?: string;
+  /** API token for HyperSync (optional for public endpoints) */
+  apiToken?: string;
   /** Fallback RPC URL for contract reads (HyperSync only provides logs/blocks) */
   fallbackRpc?: string;
 }

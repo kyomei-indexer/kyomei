@@ -308,33 +308,51 @@ export class SchemaManager {
       defaultValue: string | null;
     }> = [];
 
-    // Access the internal column structure
-    const tableConfig = (
-      table as unknown as { _: { columns: Record<string, unknown> } }
-    )._;
+    // In newer Drizzle versions, columns are directly on the table object
+    // Skip non-column properties
+    const skipKeys = new Set(['_', 'enableRLS', Symbol.for('drizzle:Name')]);
+    
+    for (const [key, value] of Object.entries(table)) {
+      if (skipKeys.has(key)) continue;
+      
+      // Check if this is a column (has columnType property)
+      const col = value as {
+        name?: string;
+        dataType?: string;
+        notNull?: boolean;
+        primary?: boolean;
+        default?: unknown;
+        hasDefault?: boolean;
+        columnType?: string;
+        length?: number;
+        precision?: number;
+        scale?: number;
+      };
 
-    if (tableConfig?.columns) {
-      for (const [key, col] of Object.entries(tableConfig.columns)) {
-        const column = col as {
-          name: string;
-          dataType: string;
-          notNull: boolean;
-          primary: boolean;
-          default?: unknown;
-          columnType: string;
-        };
+      if (!col.columnType) continue;
 
-        columns.push({
-          name: column.name ?? key,
-          type: this.mapDrizzleType(column.columnType, column.dataType),
-          notNull: column.notNull ?? false,
-          primaryKey: column.primary ?? false,
-          defaultValue:
-            column.default !== undefined
-              ? this.formatDefaultValue(column.default)
-              : null,
-        });
+      let type = this.mapDrizzleType(col.columnType, col.dataType ?? '');
+      
+      // Add length for varchar
+      if (col.columnType === 'PgVarchar' && col.length) {
+        type = `VARCHAR(${col.length})`;
       }
+      
+      // Add precision/scale for numeric
+      if (col.columnType === 'PgNumeric' && col.precision) {
+        type = `NUMERIC(${col.precision}${col.scale !== undefined ? `, ${col.scale}` : ''})`;
+      }
+
+      columns.push({
+        name: col.name ?? key,
+        type,
+        notNull: col.notNull ?? false,
+        primaryKey: col.primary ?? false,
+        defaultValue:
+          col.hasDefault && col.default !== undefined
+            ? this.formatDefaultValue(col.default)
+            : null,
+      });
     }
 
     return columns;

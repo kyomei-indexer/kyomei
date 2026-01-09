@@ -1,6 +1,9 @@
 import { defineConfig, factory } from "@kyomei/config";
 import { createKyomei } from "@kyomei/processor";
 import { UniswapV2FactoryAbi, UniswapV2PairAbi } from "./src/abis/index.ts";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 /**
  * Contract ABIs with full type information for event inference.
@@ -61,9 +64,7 @@ export default defineConfig({
       source: {
         type: "hypersync",
         url: process.env.HYPERSYNC_URL ?? "https://eth.hypersync.xyz",
-        apiToken:
-          process.env.HYPERSYNC_API_TOKEN ??
-          "b54b47fd-5cd0-46b4-beb2-40ea2849f8ac",
+        apiToken: process.env.HYPERSYNC_API_TOKEN ?? "",
         fallbackRpc: process.env.FALLBACK_RPC_URL ?? "https://eth.llamarpc.com",
       },
       pollingInterval: 12000,

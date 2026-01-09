@@ -1,5 +1,5 @@
 import type { LogLevel } from '@kyomei/config';
-import type { ILogger, LogContext, ProgressInfo } from '../../application/ports/ILogger.ts';
+import type { ILogger, LogContext, ProgressInfo, PhaseProgress } from '../../application/ports/ILogger.ts';
 import { LOG_LEVEL_VALUES } from '../../application/ports/ILogger.ts';
 
 /**
@@ -18,6 +18,14 @@ const COLORS = {
   white: '\x1b[37m',
   gray: '\x1b[90m',
 };
+
+/**
+ * Tracked progress state per chain
+ */
+interface ChainProgressState {
+  sync?: PhaseProgress & { startTime: number };
+  process?: PhaseProgress & { startTime: number };
+}
 
 /**
  * Log level to color mapping
@@ -52,7 +60,10 @@ export class Logger implements ILogger {
   private readonly context: LogContext;
   private progressLine: string | null = null;
   private lastProgressUpdate: number = 0;
-  private readonly progressThrottleMs = 100;
+  private readonly progressThrottleMs = 250;
+  
+  // Track progress per chain for combined display
+  private chainProgress: Map<string, ChainProgressState> = new Map();
 
   constructor(config: {
     level: LogLevel;
@@ -91,31 +102,166 @@ export class Logger implements ILogger {
   progress(info: ProgressInfo): void {
     if (!this.showProgress) return;
 
-    // Throttle progress updates
     const now = Date.now();
+    
+    // Update chain progress state
+    let state = this.chainProgress.get(info.chain);
+    if (!state) {
+      state = {};
+      this.chainProgress.set(info.chain, state);
+    }
+
+    const phaseData: PhaseProgress & { startTime: number } = {
+      current: info.blocksSynced,
+      total: info.totalBlocks,
+      percentage: Math.min(100, Math.max(0, info.percentage)),
+      rate: info.blocksPerSecond,
+      startTime: state[info.phase === 'syncing' ? 'sync' : 'process']?.startTime ?? now,
+    };
+
+    if (info.phase === 'syncing') {
+      // Syncer historical sync
+      state.sync = phaseData;
+    } else if (info.phase === 'processing') {
+      // Processor processing historical events
+      state.process = phaseData;
+    } else if (info.phase === 'live') {
+      // Live phase - could be from syncer (sync complete) or processor (processing complete)
+      // If we have workers > 1, it's from syncer (completed)
+      // If rate is from events/sec, it's from processor
+      if (info.workers && info.workers > 0) {
+        // Syncer went live - clear sync progress
+        state.sync = undefined;
+      } else {
+        // Processor went live
+        state.process = phaseData;
+      }
+    }
+
+    // Throttle display updates
     if (now - this.lastProgressUpdate < this.progressThrottleMs) return;
     this.lastProgressUpdate = now;
 
-    const percent = this.calculateProgress(info);
-    const blocksRemaining = info.targetBlock - info.currentBlock;
-    const eta = this.formatEta(info.estimatedTimeRemaining);
-    const bps = info.blocksPerSecond ? `${info.blocksPerSecond.toFixed(1)} bps` : '';
+    // Build combined progress display
+    this.displayCombinedProgress();
+  }
 
-    // Build progress bar
-    const barWidth = 30;
-    const filled = Math.round((percent / 100) * barWidth);
-    const empty = barWidth - filled;
-    const bar = `[${'█'.repeat(filled)}${'░'.repeat(empty)}]`;
+  /**
+   * Display combined progress for all chains
+   */
+  private displayCombinedProgress(): void {
+    const parts: string[] = [];
 
-    const phaseColor = info.phase === 'live' ? COLORS.green : COLORS.cyan;
-    const phaseLabel = info.phase.toUpperCase().padEnd(10);
+    for (const [chain, state] of this.chainProgress) {
+      const chainParts: string[] = [];
+      chainParts.push(`${COLORS.bold}${chain}${COLORS.reset}`);
 
-    this.progressLine = `${phaseColor}${phaseLabel}${COLORS.reset} ${COLORS.bold}${info.chain}${COLORS.reset} ${bar} ${percent.toFixed(1)}% | Block ${info.currentBlock}/${info.targetBlock} | ${blocksRemaining} remaining | ${bps} | ETA: ${eta}`;
+      // Sync progress
+      if (state.sync && state.sync.percentage < 100) {
+        const syncPct = state.sync.percentage.toFixed(1);
+        const syncBar = this.miniBar(state.sync.percentage);
+        chainParts.push(`${COLORS.cyan}sync${COLORS.reset}:${syncBar}${syncPct}%`);
+      }
+
+      // Process progress
+      if (state.process) {
+        const procPct = state.process.percentage.toFixed(1);
+        const procBar = this.miniBar(state.process.percentage);
+        const phase = state.process.percentage >= 100 ? 'live' : 'proc';
+        const color = phase === 'live' ? COLORS.green : COLORS.yellow;
+        chainParts.push(`${color}${phase}${COLORS.reset}:${procBar}${procPct}%`);
+      }
+
+      // Rate (use sync rate if syncing, otherwise process rate)
+      const rate = state.sync?.rate ?? state.process?.rate;
+      if (rate && rate > 0) {
+        chainParts.push(`${COLORS.dim}${this.formatRate(rate)}${COLORS.reset}`);
+      }
+
+      // ETA calculation
+      const eta = this.calculateEta(state);
+      if (eta) {
+        chainParts.push(`${COLORS.dim}ETA ${eta}${COLORS.reset}`);
+      }
+
+      parts.push(chainParts.join(' '));
+    }
+
+    if (parts.length === 0) return;
+
+    this.progressLine = parts.join(' | ');
 
     // Clear line and write progress
     if (process.stdout.isTTY) {
       process.stdout.write(`\r\x1b[K${this.progressLine}`);
     }
+  }
+
+  /**
+   * Get plain text progress line (for non-TTY output)
+   */
+  getProgressText(): string | null {
+    if (!this.progressLine) return null;
+    // Strip ANSI codes for plain text
+    return this.progressLine.replace(/\x1b\[[0-9;]*m/g, '');
+  }
+
+  /**
+   * Create a mini progress bar (5 chars)
+   */
+  private miniBar(percentage: number): string {
+    const width = 5;
+    const filled = Math.round((percentage / 100) * width);
+    return `${COLORS.dim}[${COLORS.reset}${'█'.repeat(filled)}${'░'.repeat(width - filled)}${COLORS.dim}]${COLORS.reset}`;
+  }
+
+  /**
+   * Format rate compactly
+   */
+  private formatRate(rate: number): string {
+    if (rate >= 1000) {
+      return `${(rate / 1000).toFixed(1)}k/s`;
+    }
+    return `${rate.toFixed(0)}/s`;
+  }
+
+  /**
+   * Calculate ETA from current state
+   */
+  private calculateEta(state: ChainProgressState): string | null {
+    // Prioritize sync ETA if still syncing
+    if (state.sync && state.sync.percentage < 100 && state.sync.rate && state.sync.rate > 0) {
+      const remaining = state.sync.total - state.sync.current;
+      const seconds = remaining / state.sync.rate;
+      return this.formatEtaCompact(seconds);
+    }
+
+    // Otherwise use process ETA
+    if (state.process && state.process.percentage < 100 && state.process.rate && state.process.rate > 0) {
+      const remaining = state.process.total - state.process.current;
+      const seconds = remaining / state.process.rate;
+      return this.formatEtaCompact(seconds);
+    }
+
+    return null;
+  }
+
+  /**
+   * Format ETA in compact form (e.g., "5m32s", "2h15m")
+   */
+  private formatEtaCompact(seconds: number): string {
+    if (!seconds || seconds <= 0 || !isFinite(seconds)) return '';
+    
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+
+    if (hours > 0) {
+      return `${hours}h${minutes}m`;
+    } else if (minutes > 0) {
+      return `${minutes}m${secs}s`;
+    }
+    return `${secs}s`;
   }
 
   clearProgress(): void {
@@ -239,24 +385,6 @@ export class Logger implements ILogger {
     if (context.error instanceof Error && level === 'error') {
       console.log(`${COLORS.dim}${context.error.stack}${COLORS.reset}`);
     }
-  }
-
-  private calculateProgress(info: ProgressInfo): number {
-    const total = info.targetBlock - info.startBlock;
-    if (total <= 0n) return 100;
-
-    const processed = info.currentBlock - info.startBlock;
-    return Number((processed * 100n) / total);
-  }
-
-  private formatEta(seconds?: number): string {
-    if (!seconds || seconds <= 0) return '--:--:--';
-
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = Math.floor(seconds % 60);
-
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   }
 }
 

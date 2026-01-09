@@ -748,6 +748,16 @@ kyomei backup --restore <filename>
 
 ---
 
+# Extra notes
+
+- The comunication between the sync and the processor for tracking new events and live mode need to be using queues github.com/citusdata/pg_cron using ddd as a arquitecture of events.
+
+- The views on the kyomei*app since they are the raw events need to start always by event*
+
+- Improve log system
+
+- Schema version - appended to app/crons schema names \* e.g., kyomei_app_v1, kyomei_crons_v1
+
 ## License
 
 MIT

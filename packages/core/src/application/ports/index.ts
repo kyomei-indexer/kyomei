@@ -16,6 +16,8 @@ export type {
   ILoggerFactory,
   LogContext,
   ProgressInfo,
+  PhaseProgress,
+  CombinedProgress,
 } from './ILogger.ts';
 export { LOG_LEVEL_VALUES, verbosityToLogLevel } from './ILogger.ts';
 
@@ -28,10 +30,21 @@ export type {
 
 // Checkpoint repository ports
 export type {
-  ISyncCheckpointRepository,
+  // Sync worker types
+  SyncStatus,
+  SyncWorker,
+  ISyncWorkerRepository,
+  // Process worker types
+  ProcessStatus,
+  ProcessWorker,
+  IProcessWorkerRepository,
+  // Process checkpoints
   IProcessCheckpointRepository,
-  SyncCheckpoint,
   ProcessCheckpoint,
+  // Legacy types (deprecated)
+  ISyncCheckpointRepository,
+  SyncCheckpoint,
+  WorkerCheckpoint,
 } from './ICheckpointRepository.ts';
 
 // RPC cache repository ports

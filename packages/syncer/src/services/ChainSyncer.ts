@@ -1,10 +1,11 @@
 import type {
   IBlockSource,
   IEventRepository,
-  ISyncCheckpointRepository,
+  ISyncWorkerRepository,
   ILogger,
   BlockWithLogs,
   Log,
+  SyncWorker,
 } from "@kyomei/core";
 import type { ChainConfig, ContractConfig, SyncConfig } from "@kyomei/config";
 
@@ -38,7 +39,7 @@ export interface ChainSyncerOptions {
   contracts: Array<ContractConfig & { name: string }>;
   blockSource: IBlockSource;
   eventRepository: IEventRepository;
-  checkpointRepository: ISyncCheckpointRepository;
+  workerRepository: ISyncWorkerRepository;
   logger: ILogger;
   batchSize?: number;
   onProgress?: (info: SyncProgress) => void;
@@ -50,16 +51,21 @@ export interface ChainSyncerOptions {
 export interface SyncProgress {
   chainId: number;
   chainName: string;
-  currentBlock: bigint;
-  targetBlock: bigint;
-  startBlock: bigint;
+  /** Total blocks synced across all workers */
+  blocksSynced: number;
+  /** Total blocks that need to be synced */
+  totalBlocks: number;
+  /** Percentage complete (0-100) */
+  percentage: number;
   phase: "historical" | "catchup" | "live";
+  /** Blocks per second */
   blocksPerSecond: number;
+  /** Number of active workers */
+  workers: number;
+  /** Events stored */
   eventsStored: number;
-  /** Current worker index (for parallel sync) */
-  workerId?: number;
-  /** Total number of parallel workers */
-  totalWorkers?: number;
+  /** Estimated time remaining in seconds */
+  estimatedTimeRemaining?: number;
 }
 
 /**
@@ -96,7 +102,7 @@ export class ChainSyncer {
   private readonly contracts: Array<ContractConfig & { name: string }>;
   private readonly blockSource: IBlockSource;
   private readonly eventRepo: IEventRepository;
-  private readonly checkpointRepo: ISyncCheckpointRepository;
+  private readonly workerRepo: ISyncWorkerRepository;
   private readonly logger: ILogger;
   private readonly batchSize: number;
   private readonly onProgress?: (info: SyncProgress) => void;
@@ -107,7 +113,14 @@ export class ChainSyncer {
   private startTime: number = 0;
   private blocksProcessed = 0;
   private eventsStored = 0;
+  private blocksThisSession = 0;
   private workerStates: Map<number, WorkerState> = new Map();
+
+  // Overall sync range for progress calculation
+  private syncStartBlock: bigint = 0n;
+  private syncTargetBlock: bigint = 0n;
+  private lastProgressUpdate: number = 0;
+  private readonly progressThrottleMs = 500;
 
   constructor(options: ChainSyncerOptions) {
     this.chainId = options.chainId;
@@ -116,7 +129,7 @@ export class ChainSyncer {
     this.contracts = options.contracts;
     this.blockSource = options.blockSource;
     this.eventRepo = options.eventRepository;
-    this.checkpointRepo = options.checkpointRepository;
+    this.workerRepo = options.workerRepository;
     this.logger = options.logger.child({ chain: options.chainName });
     this.batchSize = options.batchSize ?? 100;
     this.onProgress = options.onProgress;
@@ -162,45 +175,83 @@ export class ChainSyncer {
     this.startTime = Date.now();
     this.blocksProcessed = 0;
     this.eventsStored = 0;
+    this.blocksThisSession = 0;
     this.workerStates.clear();
 
     this.logger.info("Starting chain syncer");
 
     try {
-      // Get start block from checkpoint or config
-      const startBlock = await this.getStartBlock();
-      const targetBlock = await this.getTargetBlock();
-      const totalBlocks = targetBlock - startBlock;
+      // Get current workers state
+      const workers = await this.workerRepo.getWorkers(this.chainId);
+      const historicalWorkers = workers.filter(
+        (w) => w.status === "historical"
+      );
+      const liveWorker = workers.find((w) => w.status === "live");
 
-      this.logger.info(`Syncing from block ${startBlock} to ${targetBlock}`, {
-        startBlock: startBlock.toString(),
-        targetBlock: targetBlock.toString(),
-        totalBlocks: totalBlocks.toString(),
-        parallelWorkers: this.syncConfig.parallelWorkers,
-        blockRangePerRequest: this.syncConfig.blockRangePerRequest,
-      });
+      // Check for configuration changes that require a reset
+      const configChanged = await this.checkConfigurationChanged(
+        historicalWorkers
+      );
 
-      // Historical sync with parallel workers if configured
-      if (startBlock < targetBlock) {
-        const useParallel =
-          this.syncConfig.parallelWorkers > 1 &&
-          totalBlocks > BigInt(this.syncConfig.blocksPerWorker);
+      if (configChanged) {
+        this.logger.warn(
+          "⚠️  Critical configuration changed - resetting sync state and starting fresh"
+        );
+        this.logger.warn(
+          "This includes changes to: parallelWorkers, blocksPerWorker, contract startBlock, or contract addresses"
+        );
+        await this.resetSyncState();
+        // Clear cached workers after reset
+        historicalWorkers.length = 0;
+      }
 
-        if (useParallel) {
+      if (historicalWorkers.length > 0) {
+        // Resume historical sync from existing workers
+        this.logger.info(
+          `Resuming historical sync with ${historicalWorkers.length} workers`
+        );
+        await this.resumeHistoricalSync(historicalWorkers);
+      } else if (liveWorker && !configChanged) {
+        // Already in live sync mode, just continue
+        this.logger.info(
+          `Resuming live sync from block ${liveWorker.currentBlock}`
+        );
+      } else {
+        // No workers - start fresh historical sync
+        const startBlock = await this.getStartBlock();
+        const targetBlock = await this.getTargetBlock();
+        const totalBlocks = targetBlock - startBlock;
+
+        if (startBlock < targetBlock) {
           this.logger.info(
-            `Using parallel sync with ${this.syncConfig.parallelWorkers} workers`
+            `Syncing from block ${startBlock} to ${targetBlock}`,
+            {
+              startBlock: startBlock.toString(),
+              targetBlock: targetBlock.toString(),
+              totalBlocks: totalBlocks.toString(),
+            }
           );
-          await this.syncRangeParallel(startBlock, targetBlock);
-        } else {
-          await this.syncRange(startBlock, targetBlock, 0);
+
+          const useParallel =
+            this.syncConfig.parallelWorkers > 1 &&
+            totalBlocks > BigInt(this.syncConfig.blocksPerWorker);
+
+          if (useParallel) {
+            this.logger.info(
+              `Starting parallel sync with ${this.syncConfig.parallelWorkers} workers`
+            );
+            await this.startHistoricalSync(startBlock, targetBlock);
+          } else {
+            await this.syncRange(startBlock, targetBlock);
+          }
         }
       }
 
-      // Live sync
-      if (this.blockSource.providesValidatedData || this.hasRealtimeSupport()) {
+      // Live sync - use subscriptions if available, otherwise poll
+      if (this.hasRealtimeSupport()) {
         await this.startLiveSync();
       } else {
-        // Poll-based live sync for RPC sources
+        // Poll-based live sync for RPC sources and HyperSync
         await this.startPollingSync();
       }
     } catch (error) {
@@ -211,6 +262,86 @@ export class ChainSyncer {
     } finally {
       this.isRunning = false;
     }
+  }
+
+  /**
+   * Check if critical configuration has changed since last sync
+   * Critical changes include: parallelWorkers, blocksPerWorker, contract startBlock, addresses
+   */
+  private async checkConfigurationChanged(
+    historicalWorkers: SyncWorker[]
+  ): Promise<boolean> {
+    // If no historical workers, check live worker against contract startBlock
+    if (historicalWorkers.length === 0) {
+      const liveWorker = await this.workerRepo.getLiveWorker(this.chainId);
+      if (!liveWorker) {
+        return false; // Fresh start, no change detection needed
+      }
+
+      // Check if configured startBlock is after the live worker's block (user moved startBlock forward)
+      const configuredStartBlock = this.getConfiguredStartBlock();
+      if (configuredStartBlock > liveWorker.currentBlock) {
+        this.logger.warn(
+          `Contract startBlock (${configuredStartBlock}) is after checkpoint (${liveWorker.currentBlock})`
+        );
+        return true;
+      }
+
+      return false;
+    }
+
+    // Check if number of workers changed
+    if (historicalWorkers.length !== this.syncConfig.parallelWorkers) {
+      this.logger.warn(
+        `Worker count changed: was ${historicalWorkers.length}, now ${this.syncConfig.parallelWorkers}`
+      );
+      return true;
+    }
+
+    // Check if start block changed
+    const existingRangeStart = historicalWorkers.reduce(
+      (min, w) => (w.rangeStart < min ? w.rangeStart : min),
+      historicalWorkers[0].rangeStart
+    );
+
+    // Calculate what the ranges would be with current config
+    const configuredStartBlock = this.getConfiguredStartBlock();
+
+    // If the configured start block is different from what was stored
+    if (configuredStartBlock !== existingRangeStart) {
+      this.logger.warn(
+        `Start block changed: was ${existingRangeStart}, now ${configuredStartBlock}`
+      );
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Get the configured start block from contracts
+   */
+  private getConfiguredStartBlock(): bigint {
+    const startBlocks = this.contracts.map((c) => BigInt(c.startBlock));
+    return startBlocks.length > 0
+      ? BigInt(Math.min(...startBlocks.map(Number)))
+      : 0n;
+  }
+
+  /**
+   * Reset all sync state for this chain
+   */
+  private async resetSyncState(): Promise<void> {
+    this.logger.info("Resetting sync state for chain", {
+      chainId: this.chainId,
+    });
+
+    // Delete all workers (both historical and live)
+    await this.workerRepo.deleteAllWorkers(this.chainId);
+
+    this.logger.info(
+      "Sync state reset complete - starting fresh from configured startBlock"
+    );
   }
 
   /**
@@ -274,30 +405,141 @@ export class ChainSyncer {
   }
 
   /**
-   * Sync a range of blocks using parallel workers
+   * Resume historical sync from saved workers
    */
-  private async syncRangeParallel(
+  private async resumeHistoricalSync(workers: SyncWorker[]): Promise<void> {
+    // Find the overall range from workers
+    const minStart = workers.reduce(
+      (min, w) => (w.rangeStart < min ? w.rangeStart : min),
+      workers[0].rangeStart
+    );
+    const maxEnd = workers.reduce(
+      (max, w) => (w.rangeEnd !== null && w.rangeEnd > max ? w.rangeEnd : max),
+      workers[0].rangeEnd ?? 0n
+    );
+
+    this.syncStartBlock = minStart;
+    this.syncTargetBlock = maxEnd;
+
+    // Initialize worker states from saved workers
+    // blocksProcessed = blocks already synced before this session
+    for (const worker of workers) {
+      // Calculate blocks already processed (currentBlock is the last processed block)
+      // If currentBlock < rangeStart, nothing processed yet (currentBlock was set to rangeStart - 1)
+      const blocksAlreadyProcessed =
+        worker.currentBlock >= worker.rangeStart
+          ? Number(worker.currentBlock - worker.rangeStart + 1n)
+          : 0;
+
+      this.workerStates.set(worker.workerId, {
+        workerId: worker.workerId,
+        currentBlock: worker.currentBlock,
+        targetBlock: worker.rangeEnd ?? worker.currentBlock,
+        blocksProcessed: blocksAlreadyProcessed,
+        eventsStored: 0,
+        isComplete: false,
+      });
+    }
+
+    // Build chunks for workers - resume from next block after last processed
+    const chunks: WorkerChunk[] = workers
+      .map((w) => ({
+        workerId: w.workerId,
+        // Resume from next block after last processed
+        fromBlock:
+          w.currentBlock >= w.rangeStart ? w.currentBlock + 1n : w.rangeStart,
+        toBlock: w.rangeEnd ?? w.currentBlock,
+      }))
+      .filter((c) => c.fromBlock <= c.toBlock); // Skip if already complete
+
+    if (chunks.length === 0) {
+      this.logger.info("All workers already completed their ranges");
+      // Transition to live sync
+      await this.transitionToLiveSync(maxEnd);
+      return;
+    }
+
+    // Calculate and log resume status
+    let totalBlocks = 0n;
+    let alreadyProcessed = 0n;
+    for (const worker of workers) {
+      const workerBlocks =
+        (worker.rangeEnd ?? worker.currentBlock) - worker.rangeStart + 1n;
+      const workerProcessed =
+        worker.currentBlock >= worker.rangeStart
+          ? worker.currentBlock - worker.rangeStart + 1n
+          : 0n;
+
+      totalBlocks += workerBlocks;
+      alreadyProcessed += workerProcessed;
+
+      this.logger.debug(`Worker ${worker.workerId} status`, {
+        rangeStart: worker.rangeStart.toString(),
+        rangeEnd: worker.rangeEnd?.toString() ?? "null",
+        currentBlock: worker.currentBlock.toString(),
+        workerBlocks: workerBlocks.toString(),
+        workerProcessed: workerProcessed.toString(),
+      });
+    }
+    const resumePercent =
+      totalBlocks > 0n ? Number((alreadyProcessed * 100n) / totalBlocks) : 0;
+
+    this.logger.info(
+      `Resuming historical sync at ${resumePercent.toFixed(
+        1
+      )}% (${alreadyProcessed}/${totalBlocks} blocks)`,
+      {
+        activeWorkers: chunks.length,
+        totalWorkers: workers.length,
+        syncStartBlock: this.syncStartBlock.toString(),
+        syncTargetBlock: this.syncTargetBlock.toString(),
+      }
+    );
+
+    // Start workers
+    const workerPromises = chunks.map((chunk) =>
+      this.runWorker(chunk).catch((error) => {
+        const state = this.workerStates.get(chunk.workerId);
+        if (state) {
+          state.error = error as Error;
+          state.isComplete = true;
+        }
+        this.logger.error(`Worker ${chunk.workerId} failed`, {
+          error: error as Error,
+        });
+      })
+    );
+
+    await Promise.all(workerPromises);
+    await this.finalizeHistoricalSync();
+  }
+
+  /**
+   * Start historical sync with parallel workers
+   */
+  private async startHistoricalSync(
     fromBlock: bigint,
     toBlock: bigint
   ): Promise<void> {
+    // Store overall range for progress calculation
+    this.syncStartBlock = fromBlock;
+    this.syncTargetBlock = toBlock;
+
     const chunks = this.createWorkerChunks(
       fromBlock,
       toBlock,
       this.syncConfig.parallelWorkers
     );
 
-    this.logger.info(`Starting parallel historical sync`, {
-      workers: chunks.length,
+    this.logger.info(`Starting historical sync with ${chunks.length} workers`, {
+      fromBlock: fromBlock.toString(),
+      toBlock: toBlock.toString(),
       totalBlocks: (toBlock - fromBlock + 1n).toString(),
-      chunks: chunks.map((c) => ({
-        worker: c.workerId,
-        from: c.fromBlock.toString(),
-        to: c.toBlock.toString(),
-        blocks: (c.toBlock - c.fromBlock + 1n).toString(),
-      })),
     });
 
-    // Initialize worker states
+    const now = new Date();
+
+    // Initialize worker states and save initial workers
     for (const chunk of chunks) {
       this.workerStates.set(chunk.workerId, {
         workerId: chunk.workerId,
@@ -306,6 +548,18 @@ export class ChainSyncer {
         blocksProcessed: 0,
         eventsStored: 0,
         isComplete: false,
+      });
+
+      // Save initial worker for resume capability
+      await this.workerRepo.setWorker({
+        chainId: this.chainId,
+        workerId: chunk.workerId,
+        rangeStart: chunk.fromBlock,
+        rangeEnd: chunk.toBlock,
+        currentBlock: chunk.fromBlock - 1n, // Haven't processed any blocks yet
+        status: "historical",
+        createdAt: now,
+        updatedAt: now,
       });
     }
 
@@ -327,37 +581,90 @@ export class ChainSyncer {
 
     // Wait for all workers to complete
     await Promise.all(workerPromises);
+    await this.finalizeHistoricalSync();
+  }
 
+  /**
+   * Finalize historical sync - check errors and transition to live
+   */
+  private async finalizeHistoricalSync(): Promise<void> {
     // Check for any worker errors
     const errors = Array.from(this.workerStates.values()).filter(
       (s) => s.error
     );
     if (errors.length > 0) {
       throw new Error(
-        `${errors.length} workers failed during parallel sync: ${errors
+        `${errors.length} workers failed during historical sync: ${errors
           .map((e) => e.error?.message)
           .join(", ")}`
       );
     }
 
+    // Check if sync was aborted - don't clean up workers if so
+    const wasAborted = this.abortController?.signal.aborted ?? false;
+
     // Aggregate final stats
     let totalBlocksProcessed = 0;
     let totalEventsStored = 0;
+    let allWorkersComplete = true;
+
     for (const state of this.workerStates.values()) {
       totalBlocksProcessed += state.blocksProcessed;
       totalEventsStored += state.eventsStored;
+      if (!state.isComplete) {
+        allWorkersComplete = false;
+      }
     }
 
     this.blocksProcessed = totalBlocksProcessed;
     this.eventsStored = totalEventsStored;
 
-    // Update checkpoint to the highest completed block
-    await this.updateCheckpoint(toBlock, "0x" as `0x${string}`);
+    // Only transition to live if all workers completed successfully (not aborted)
+    if (allWorkersComplete && !wasAborted) {
+      await this.transitionToLiveSync(this.syncTargetBlock);
 
-    this.logger.info("Parallel historical sync complete", {
-      workers: chunks.length,
-      blocks: totalBlocksProcessed.toString(),
-      events: totalEventsStored.toString(),
+      this.logger.info("Historical sync complete", {
+        workers: this.workerStates.size,
+        blocks: totalBlocksProcessed,
+        events: totalEventsStored,
+      });
+    } else {
+      this.logger.info(
+        "Historical sync stopped - workers preserved for resume",
+        {
+          workers: this.workerStates.size,
+          blocks: totalBlocksProcessed,
+          events: totalEventsStored,
+          wasAborted,
+          allWorkersComplete,
+        }
+      );
+    }
+  }
+
+  /**
+   * Transition from historical sync to live sync
+   * Deletes all historical workers and creates a single live worker
+   */
+  private async transitionToLiveSync(lastBlock: bigint): Promise<void> {
+    // Delete all historical workers
+    await this.workerRepo.deleteAllWorkers(this.chainId);
+
+    // Create live worker (worker_id = 0)
+    const now = new Date();
+    await this.workerRepo.setWorker({
+      chainId: this.chainId,
+      workerId: 0,
+      rangeStart: lastBlock,
+      rangeEnd: null, // null for live sync
+      currentBlock: lastBlock,
+      status: "live",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    this.logger.info("Transitioned to live sync", {
+      lastHistoricalBlock: lastBlock.toString(),
     });
   }
 
@@ -365,15 +672,35 @@ export class ChainSyncer {
    * Run a single worker for a chunk of blocks
    */
   private async runWorker(chunk: WorkerChunk): Promise<void> {
-    const workerLogger = this.logger.child({
-      worker: chunk.workerId,
-      totalWorkers: this.syncConfig.parallelWorkers,
-    });
     const state = this.workerStates.get(chunk.workerId)!;
 
-    workerLogger.info(
-      `Worker ${chunk.workerId} starting: blocks ${chunk.fromBlock} to ${chunk.toBlock}`
+    // Get the worker from database (may be resuming)
+    const existingWorker = await this.workerRepo.getWorker(
+      this.chainId,
+      chunk.workerId
     );
+
+    if (!existingWorker) {
+      this.logger.warn(
+        `No existing worker found for ${chunk.workerId}, using chunk values`
+      );
+    }
+
+    const rangeStart = existingWorker?.rangeStart ?? chunk.fromBlock;
+    const rangeEnd = existingWorker?.rangeEnd ?? chunk.toBlock;
+
+    this.logger.debug(`Worker ${chunk.workerId} starting`, {
+      fromBlock: chunk.fromBlock.toString(),
+      toBlock: chunk.toBlock.toString(),
+      rangeStart: rangeStart.toString(),
+      rangeEnd: rangeEnd?.toString() ?? "null",
+      existingWorker: existingWorker
+        ? {
+            currentBlock: existingWorker.currentBlock.toString(),
+            status: existingWorker.status,
+          }
+        : "none",
+    });
 
     // Build log filter for contracts
     const addresses = this.getContractAddresses();
@@ -386,27 +713,88 @@ export class ChainSyncer {
           }
         : undefined;
 
+    // Track if worker was aborted
+    let wasAborted = false;
+
     // Stream blocks with logs
     for await (const blockWithLogs of this.blockSource.getBlocks(
       { from: chunk.fromBlock, to: chunk.toBlock },
       filter
     )) {
-      if (this.abortController?.signal.aborted) break;
+      if (this.abortController?.signal.aborted) {
+        wasAborted = true;
+        // Save worker with current progress before stopping
+        await this.saveWorkerProgress(
+          chunk.workerId,
+          rangeStart,
+          rangeEnd,
+          state.currentBlock
+        );
+        this.logger.debug(`Worker ${chunk.workerId} aborted`, {
+          savedBlock: state.currentBlock.toString(),
+          blocksProcessed: state.blocksProcessed,
+        });
+        break;
+      }
 
       await this.processBlockForWorker(blockWithLogs, state);
       state.currentBlock = blockWithLogs.block.number;
       state.blocksProcessed++;
+      this.blocksThisSession++;
 
-      // Emit progress periodically
+      // Save worker progress periodically (per worker, not global)
       if (state.blocksProcessed % this.batchSize === 0) {
-        this.emitWorkerProgress(state, chunk);
+        await this.saveWorkerProgress(
+          chunk.workerId,
+          rangeStart,
+          rangeEnd,
+          state.currentBlock
+        );
       }
+
+      // Emit aggregated progress periodically (throttled)
+      this.emitAggregatedProgress();
     }
 
-    state.isComplete = true;
-    workerLogger.info(`Worker ${chunk.workerId} complete`, {
-      blocks: state.blocksProcessed.toString(),
-      events: state.eventsStored.toString(),
+    // Only mark as complete if we weren't aborted
+    if (!wasAborted) {
+      state.isComplete = true;
+
+      // Worker completed - delete it (completed workers are removed)
+      await this.workerRepo.deleteWorker(this.chainId, chunk.workerId);
+
+      this.logger.debug(`Worker ${chunk.workerId} complete`, {
+        blocks: state.blocksProcessed,
+        events: state.eventsStored,
+      });
+    }
+  }
+
+  /**
+   * Save worker progress for resume capability
+   */
+  private async saveWorkerProgress(
+    workerId: number,
+    rangeStart: bigint,
+    rangeEnd: bigint | null,
+    currentBlock: bigint
+  ): Promise<void> {
+    this.logger.trace(`Saving progress for worker ${workerId}`, {
+      rangeStart: rangeStart.toString(),
+      rangeEnd: rangeEnd?.toString() ?? "null",
+      currentBlock: currentBlock.toString(),
+    });
+
+    const now = new Date();
+    await this.workerRepo.setWorker({
+      chainId: this.chainId,
+      workerId,
+      rangeStart,
+      rangeEnd,
+      currentBlock,
+      status: "historical",
+      createdAt: now, // Will be ignored on update
+      updatedAt: now,
     });
   }
 
@@ -445,54 +833,87 @@ export class ChainSyncer {
   }
 
   /**
-   * Emit progress for a specific worker
+   * Emit aggregated progress from all workers (throttled)
    */
-  private emitWorkerProgress(state: WorkerState, chunk: WorkerChunk): void {
+  private emitAggregatedProgress(): void {
     if (!this.onProgress) return;
 
-    const elapsed = (Date.now() - this.startTime) / 1000;
+    // Throttle progress updates
+    const now = Date.now();
+    if (now - this.lastProgressUpdate < this.progressThrottleMs) return;
+    this.lastProgressUpdate = now;
+
+    const elapsed = (now - this.startTime) / 1000;
 
     // Aggregate progress from all workers
     let totalBlocksProcessed = 0;
     let totalEventsStored = 0;
-    let minCurrentBlock = state.currentBlock;
+    let activeWorkers = 0;
 
     for (const workerState of this.workerStates.values()) {
       totalBlocksProcessed += workerState.blocksProcessed;
       totalEventsStored += workerState.eventsStored;
-      if (workerState.currentBlock < minCurrentBlock) {
-        minCurrentBlock = workerState.currentBlock;
+      if (!workerState.isComplete) {
+        activeWorkers++;
       }
     }
 
-    const blocksPerSecond = elapsed > 0 ? totalBlocksProcessed / elapsed : 0;
+    // Calculate total blocks to sync
+    const totalBlocks = Number(this.syncTargetBlock - this.syncStartBlock + 1n);
+
+    // Calculate percentage
+    const percentage =
+      totalBlocks > 0
+        ? Math.min(100, (totalBlocksProcessed / totalBlocks) * 100)
+        : 0;
+
+    // Calculate speed based on blocks processed in this session
+    const blocksPerSecond = elapsed > 0 ? this.blocksThisSession / elapsed : 0;
+
+    // Calculate ETA based on remaining blocks and current speed
+    const blocksRemaining = totalBlocks - totalBlocksProcessed;
+    const estimatedTimeRemaining =
+      blocksPerSecond > 0 ? blocksRemaining / blocksPerSecond : undefined;
 
     this.onProgress({
       chainId: this.chainId,
       chainName: this.chainName,
-      currentBlock: minCurrentBlock,
-      targetBlock: chunk.toBlock,
-      startBlock: chunk.fromBlock,
+      blocksSynced: totalBlocksProcessed,
+      totalBlocks,
+      percentage,
       phase: "historical",
       blocksPerSecond,
+      workers: activeWorkers,
       eventsStored: totalEventsStored,
-      workerId: state.workerId,
-      totalWorkers: this.syncConfig.parallelWorkers,
+      estimatedTimeRemaining,
     });
   }
 
   /**
    * Sync a range of blocks (single-threaded)
    */
-  private async syncRange(
-    fromBlock: bigint,
-    toBlock: bigint,
-    workerId: number = 0
-  ): Promise<void> {
+  private async syncRange(fromBlock: bigint, toBlock: bigint): Promise<void> {
+    // Set sync range for progress calculation
+    this.syncStartBlock = fromBlock;
+    this.syncTargetBlock = toBlock;
+
     const totalBlocks = toBlock - fromBlock + 1n;
     let currentBlock = fromBlock;
 
     this.logger.info(`Starting historical sync: ${totalBlocks} blocks`);
+
+    // Create single historical worker (worker_id = 1)
+    const now = new Date();
+    await this.workerRepo.setWorker({
+      chainId: this.chainId,
+      workerId: 1,
+      rangeStart: fromBlock,
+      rangeEnd: toBlock,
+      currentBlock: fromBlock - 1n, // Haven't processed any blocks yet
+      status: "historical",
+      createdAt: now,
+      updatedAt: now,
+    });
 
     // Build log filter for contracts
     const addresses = this.getContractAddresses();
@@ -511,31 +932,24 @@ export class ChainSyncer {
       await this.processBlock(blockWithLogs);
       currentBlock = blockWithLogs.block.number;
       this.blocksProcessed++;
+      this.blocksThisSession++;
 
-      // Update checkpoint periodically
-      if (this.blocksProcessed % this.batchSize === 0) {
-        await this.updateCheckpoint(currentBlock, blockWithLogs.block.hash);
-        this.emitProgress(
-          currentBlock,
-          toBlock,
-          fromBlock,
-          "historical",
-          workerId
-        );
+      // Update worker progress periodically
+      if (this.blocksThisSession % this.batchSize === 0) {
+        await this.saveWorkerProgress(1, fromBlock, toBlock, currentBlock);
+        this.emitProgress(currentBlock, toBlock, fromBlock, "historical");
       }
     }
 
-    // Final checkpoint update
+    // Final update - delete historical worker and transition to live sync
     if (currentBlock > fromBlock) {
-      const checkpoint = await this.checkpointRepo.get(this.chainId);
-      if (!checkpoint || checkpoint.blockNumber < currentBlock) {
-        await this.updateCheckpoint(currentBlock, "0x" as `0x${string}`);
-      }
+      await this.workerRepo.deleteWorker(this.chainId, 1);
+      await this.transitionToLiveSync(currentBlock);
     }
 
     this.logger.info("Historical sync complete", {
-      blocks: this.blocksProcessed.toString(),
-      events: this.eventsStored.toString(),
+      blocks: this.blocksProcessed,
+      events: this.eventsStored,
     });
   }
 
@@ -544,7 +958,11 @@ export class ChainSyncer {
    */
   private async startLiveSync(): Promise<void> {
     if (!this.blockSource.onBlock) {
-      this.logger.warn("Block source does not support subscriptions");
+      // Fallback to polling if subscriptions not available
+      this.logger.debug(
+        "Block source does not support subscriptions, falling back to polling"
+      );
+      await this.startPollingSync();
       return;
     }
 
@@ -558,10 +976,7 @@ export class ChainSyncer {
 
       await this.processBlock(blockWithLogs);
       this.blocksProcessed++;
-      await this.updateCheckpoint(
-        blockWithLogs.block.number,
-        blockWithLogs.block.hash
-      );
+      await this.updateLiveWorker(blockWithLogs.block.number);
       this.emitProgress(
         blockWithLogs.block.number,
         blockWithLogs.block.number,
@@ -598,8 +1013,8 @@ export class ChainSyncer {
 
     while (!this.abortController?.signal.aborted) {
       try {
-        const checkpoint = await this.checkpointRepo.get(this.chainId);
-        const lastBlock = checkpoint?.blockNumber ?? 0n;
+        const liveWorker = await this.workerRepo.getLiveWorker(this.chainId);
+        const lastBlock = liveWorker?.currentBlock ?? 0n;
 
         // Get latest safe block
         let targetBlock: bigint;
@@ -614,7 +1029,7 @@ export class ChainSyncer {
         }
 
         if (targetBlock > lastBlock) {
-          await this.syncRange(lastBlock + 1n, targetBlock);
+          await this.syncLiveRange(lastBlock + 1n, targetBlock);
           this.emitProgress(targetBlock, targetBlock, lastBlock, "live");
         }
       } catch (error) {
@@ -623,6 +1038,70 @@ export class ChainSyncer {
 
       // Wait for next poll
       await this.sleep(pollingInterval);
+    }
+  }
+
+  /**
+   * Sync a range of blocks in live mode (updates live worker)
+   */
+  private async syncLiveRange(
+    fromBlock: bigint,
+    toBlock: bigint
+  ): Promise<void> {
+    const addresses = this.getContractAddresses();
+    const filter =
+      addresses.length > 0
+        ? { address: addresses as `0x${string}`[], fromBlock, toBlock }
+        : undefined;
+
+    let currentBlock = fromBlock;
+    for await (const blockWithLogs of this.blockSource.getBlocks(
+      { from: fromBlock, to: toBlock },
+      filter
+    )) {
+      if (this.abortController?.signal.aborted) break;
+
+      await this.processBlock(blockWithLogs);
+      currentBlock = blockWithLogs.block.number;
+      this.blocksProcessed++;
+
+      // Update live worker periodically
+      if (this.blocksProcessed % this.batchSize === 0) {
+        await this.updateLiveWorker(currentBlock);
+      }
+    }
+
+    // Final update
+    if (currentBlock >= fromBlock) {
+      await this.updateLiveWorker(currentBlock);
+    }
+  }
+
+  /**
+   * Update the live worker's current block
+   */
+  private async updateLiveWorker(currentBlock: bigint): Promise<void> {
+    const liveWorker = await this.workerRepo.getLiveWorker(this.chainId);
+
+    if (liveWorker) {
+      await this.workerRepo.setWorker({
+        ...liveWorker,
+        currentBlock,
+        updatedAt: new Date(),
+      });
+    } else {
+      // Create live worker if it doesn't exist
+      const now = new Date();
+      await this.workerRepo.setWorker({
+        chainId: this.chainId,
+        workerId: 0,
+        rangeStart: currentBlock,
+        rangeEnd: null,
+        currentBlock,
+        status: "live",
+        createdAt: now,
+        updatedAt: now,
+      });
     }
   }
 
@@ -693,10 +1172,10 @@ export class ChainSyncer {
    * Get the block to start syncing from
    */
   private async getStartBlock(): Promise<bigint> {
-    // Check checkpoint first
-    const checkpoint = await this.checkpointRepo.get(this.chainId);
-    if (checkpoint) {
-      return checkpoint.blockNumber + 1n;
+    // Check for existing live worker (already completed historical sync)
+    const liveWorker = await this.workerRepo.getLiveWorker(this.chainId);
+    if (liveWorker) {
+      return liveWorker.currentBlock + 1n;
     }
 
     // Use earliest contract start block
@@ -761,46 +1240,46 @@ export class ChainSyncer {
   }
 
   /**
-   * Update sync checkpoint
-   */
-  private async updateCheckpoint(
-    blockNumber: bigint,
-    blockHash: string
-  ): Promise<void> {
-    await this.checkpointRepo.set({
-      chainId: this.chainId,
-      blockNumber,
-      blockHash,
-      updatedAt: new Date(),
-    });
-  }
-
-  /**
-   * Emit progress update
+   * Emit progress update (throttled)
    */
   private emitProgress(
     currentBlock: bigint,
     targetBlock: bigint,
     startBlock: bigint,
-    phase: "historical" | "catchup" | "live",
-    workerId: number = 0
+    phase: "historical" | "catchup" | "live"
   ): void {
     if (!this.onProgress) return;
 
-    const elapsed = (Date.now() - this.startTime) / 1000;
-    const blocksPerSecond = elapsed > 0 ? this.blocksProcessed / elapsed : 0;
+    // Throttle progress updates
+    const now = Date.now();
+    if (now - this.lastProgressUpdate < this.progressThrottleMs) return;
+    this.lastProgressUpdate = now;
+
+    const elapsed = (now - this.startTime) / 1000;
+    const blocksPerSecond = elapsed > 0 ? this.blocksThisSession / elapsed : 0;
+
+    // Calculate totals
+    const totalBlocks = Number(targetBlock - startBlock + 1n);
+    const blocksSynced = Number(currentBlock - startBlock + 1n);
+    const percentage =
+      totalBlocks > 0 ? Math.min(100, (blocksSynced / totalBlocks) * 100) : 0;
+
+    // Calculate ETA
+    const blocksRemaining = totalBlocks - blocksSynced;
+    const estimatedTimeRemaining =
+      blocksPerSecond > 0 ? blocksRemaining / blocksPerSecond : undefined;
 
     this.onProgress({
       chainId: this.chainId,
       chainName: this.chainName,
-      currentBlock,
-      targetBlock,
-      startBlock,
+      blocksSynced,
+      totalBlocks,
+      percentage,
       phase,
       blocksPerSecond,
+      workers: 1, // Single-threaded
       eventsStored: this.eventsStored,
-      workerId,
-      totalWorkers: this.syncConfig.parallelWorkers,
+      estimatedTimeRemaining,
     });
   }
 

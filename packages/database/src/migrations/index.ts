@@ -6,6 +6,9 @@ import * as m0001 from './0001_init_schemas.ts';
 import * as m0002 from './0002_create_sync_tables.ts';
 import * as m0003 from './0003_create_app_tables.ts';
 import * as m0004 from './0004_create_crons_tables.ts';
+import * as m0005 from './0005_create_worker_checkpoints.ts';
+import * as m0006 from './0006_unified_sync_workers.ts';
+import * as m0007 from './0007_create_process_workers.ts';
 
 /**
  * Migration definition
@@ -25,6 +28,9 @@ export const migrations: Migration[] = [
   { version: 2, name: '0002_create_sync_tables', ...m0002.migration },
   { version: 3, name: '0003_create_app_tables', ...m0003.migration },
   { version: 4, name: '0004_create_crons_tables', ...m0004.migration },
+  { version: 5, name: '0005_create_worker_checkpoints', ...m0005.migration },
+  { version: 6, name: '0006_unified_sync_workers', ...m0006.migration },
+  { version: 7, name: '0007_create_process_workers', ...m0007.migration },
 ];
 
 /**

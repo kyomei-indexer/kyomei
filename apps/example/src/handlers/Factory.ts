@@ -38,35 +38,38 @@ async function fetchTokenMetadata(
  * This is triggered whenever a new trading pair is created.
  * We store the pair information and fetch token metadata.
  */
-kyomei.on("UniswapV2Factory:PairCreated", async ({ event, context }) => {
-  const { args, block } = event;
-  const { db, rpc } = context;
+kyomei.onParallel(
+  "UniswapV2Factory:PairCreated",
+  async ({ event, context }) => {
+    const { args, block } = event;
+    const { db, rpc } = context;
 
-  // Fetch token metadata using cached RPC
-  const [token0Meta, token1Meta] = await Promise.all([
-    fetchTokenMetadata(rpc, args.token0),
-    fetchTokenMetadata(rpc, args.token1),
-  ]);
+    // Fetch token metadata using cached RPC
+    const [token0Meta, token1Meta] = await Promise.all([
+      fetchTokenMetadata(rpc, args.token0),
+      fetchTokenMetadata(rpc, args.token1),
+    ]);
 
-  // Store the new pair
-  await db.insert("pairs").values({
-    address: args.pair.toLowerCase(),
-    token0: args.token0.toLowerCase(),
-    token1: args.token1.toLowerCase(),
-    token0_symbol: token0Meta?.symbol ?? null,
-    token0_decimals: token0Meta?.decimals ?? null,
-    token1_symbol: token1Meta?.symbol ?? null,
-    token1_decimals: token1Meta?.decimals ?? null,
-    reserve0: "0",
-    reserve1: "0",
-    created_at_block: block.number,
-    created_at_timestamp: block.timestamp,
-  });
+    // Store the new pair
+    await db.insert("pairs").values({
+      address: args.pair.toLowerCase(),
+      token0: args.token0.toLowerCase(),
+      token1: args.token1.toLowerCase(),
+      token0_symbol: token0Meta?.symbol ?? null,
+      token0_decimals: token0Meta?.decimals ?? null,
+      token1_symbol: token1Meta?.symbol ?? null,
+      token1_decimals: token1Meta?.decimals ?? null,
+      reserve0: "0",
+      reserve1: "0",
+      created_at_block: block.number,
+      created_at_timestamp: block.timestamp,
+    });
 
-  const pairLabel =
-    token0Meta && token1Meta
-      ? `${token0Meta.symbol}/${token1Meta.symbol}`
-      : args.pair;
+    // const pairLabel =
+    //   token0Meta && token1Meta
+    //     ? `${token0Meta.symbol}/${token1Meta.symbol}`
+    //     : args.pair;
 
-  console.log(`[PairCreated] ${pairLabel} at block ${block.number}`);
-});
+    // console.log(`[PairCreated] ${pairLabel} at block ${block.number}`);
+  }
+);

@@ -17,6 +17,7 @@
     "@kyomei/core": "workspace:*",
     "@kyomei/database": "workspace:*",
     "@kyomei/processor": "workspace:*",
+    "dotenv": "^17.2.3",
     "drizzle-orm": "^0.38.3",
     "viem": "^2.21.54"
   },

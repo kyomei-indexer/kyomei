@@ -2,7 +2,8 @@ import type { KyomeiConfig } from "@kyomei/config";
 import type { Database } from "@kyomei/database";
 import {
   EventRepository,
-  SyncCheckpointRepository,
+  SyncWorkerRepository,
+  ProcessWorkerRepository,
   ProcessCheckpointRepository,
   FactoryRepository,
   RpcCacheRepository,
@@ -16,7 +17,7 @@ import {
   CachedRpcClient,
 } from "@kyomei/core";
 import { ChainSyncer, FactoryWatcher, ViewCreator } from "@kyomei/syncer";
-import { HandlerExecutor } from "@kyomei/processor";
+import { HandlerExecutor, type HandlerRegistration } from "@kyomei/processor";
 import { CronScheduler } from "@kyomei/cron";
 
 /**
@@ -32,6 +33,8 @@ export interface ServiceRunnerOptions {
     api: boolean;
     crons: boolean;
   };
+  /** Handler registrations from Kyomei instance */
+  handlerRegistrations?: HandlerRegistration[];
 }
 
 /**
@@ -42,10 +45,12 @@ export class ServiceRunner {
   private readonly db: Database;
   private readonly logger: ILogger;
   private readonly services: ServiceRunnerOptions["services"];
+  private readonly handlerRegistrations: HandlerRegistration[];
 
   // Repositories
   private readonly eventRepo: EventRepository;
-  private readonly syncCheckpointRepo: SyncCheckpointRepository;
+  private readonly syncWorkerRepo: SyncWorkerRepository;
+  private readonly processWorkerRepo: ProcessWorkerRepository;
   private readonly processCheckpointRepo: ProcessCheckpointRepository;
   private readonly factoryRepo: FactoryRepository;
   private readonly rpcCacheRepo: RpcCacheRepository;
@@ -68,10 +73,12 @@ export class ServiceRunner {
     this.db = options.db;
     this.logger = options.logger;
     this.services = options.services;
+    this.handlerRegistrations = options.handlerRegistrations ?? [];
 
     // Initialize repositories
     this.eventRepo = new EventRepository(this.db);
-    this.syncCheckpointRepo = new SyncCheckpointRepository(this.db);
+    this.syncWorkerRepo = new SyncWorkerRepository(this.db);
+    this.processWorkerRepo = new ProcessWorkerRepository(this.db);
     this.processCheckpointRepo = new ProcessCheckpointRepository(this.db);
     this.factoryRepo = new FactoryRepository(this.db);
     this.rpcCacheRepo = new RpcCacheRepository(this.db);
@@ -127,6 +134,12 @@ export class ServiceRunner {
     if (!this.isRunning) return;
 
     this.logger.info("Stopping all services...");
+
+    // Stop processors
+    for (const [name, processor] of this.processors) {
+      await processor.stop();
+      this.logger.debug(`Stopped processor: ${name}`);
+    }
 
     // Stop syncers
     for (const [name, syncer] of this.syncers) {
@@ -199,6 +212,7 @@ export class ServiceRunner {
           blockSource = new HyperSyncBlockSource({
             chainId: chainConfig.id,
             url: source.url,
+            apiToken: source.apiToken,
             logger: this.logger,
           });
           // HyperSync doesn't provide RPC, so we need a fallback RPC for contract reads
@@ -262,16 +276,18 @@ export class ServiceRunner {
         contracts,
         blockSource,
         eventRepository: this.eventRepo,
-        checkpointRepository: this.syncCheckpointRepo,
+        workerRepository: this.syncWorkerRepo,
         logger: this.logger,
         onProgress: (progress) => {
           this.logger.progress({
             chain: progress.chainName,
-            currentBlock: progress.currentBlock,
-            targetBlock: progress.targetBlock,
-            startBlock: progress.startBlock,
+            blocksSynced: progress.blocksSynced,
+            totalBlocks: progress.totalBlocks,
+            percentage: progress.percentage,
             phase: progress.phase === "historical" ? "syncing" : "live",
             blocksPerSecond: progress.blocksPerSecond,
+            workers: progress.workers,
+            estimatedTimeRemaining: progress.estimatedTimeRemaining,
           });
         },
       });
@@ -303,9 +319,6 @@ export class ServiceRunner {
    */
   private async startProcessors(): Promise<void> {
     for (const [chainName, chainConfig] of Object.entries(this.config.chains)) {
-      const rpcClient = this.rpcClients.get(chainName);
-      if (!rpcClient) continue;
-
       // Get contracts for this chain
       const contracts = Object.entries(this.config.contracts)
         .filter(([, c]) => c.chain === chainName)
@@ -313,12 +326,22 @@ export class ServiceRunner {
 
       if (contracts.length === 0) continue;
 
-      // Create cached RPC client
-      const cachedRpc = new CachedRpcClient({
-        client: rpcClient,
-        cacheRepo: this.rpcCacheRepo,
-        logger: this.logger,
-      });
+      // Create cached RPC client if RPC is available
+      const rpcClient = this.rpcClients.get(chainName);
+      let cachedRpc: CachedRpcClient | null = null;
+
+      if (rpcClient) {
+        cachedRpc = new CachedRpcClient({
+          client: rpcClient,
+          cacheRepo: this.rpcCacheRepo,
+          logger: this.logger,
+        });
+      } else {
+        this.logger.warn(
+          `No RPC client for ${chainName} - context.rpc calls in handlers will fail. ` +
+            `Add fallbackRpc to HyperSync config if handlers need RPC access.`
+        );
+      }
 
       // Create processor
       const processor = new HandlerExecutor({
@@ -329,12 +352,49 @@ export class ServiceRunner {
         appSchema: this.config.database.appSchema ?? "kyomei_app",
         eventRepository: this.eventRepo,
         checkpointRepository: this.processCheckpointRepo,
-        rpcClient: cachedRpc,
+        workerRepository: this.processWorkerRepo,
+        syncWorkerRepository: this.syncWorkerRepo,
+        rpcClient: cachedRpc ?? undefined,
         logger: this.logger,
+        onProgress: (progress) => {
+          this.logger.progress({
+            chain: progress.chainName,
+            blocksSynced: progress.blocksProcessed,
+            totalBlocks: progress.totalBlocks,
+            percentage: progress.percentage,
+            phase: progress.status === "processing" ? "processing" : "live",
+            blocksPerSecond: progress.eventsPerSecond,
+            workers: 1,
+            estimatedTimeRemaining: undefined,
+          });
+        },
       });
 
+      // Register handlers for this chain's contracts
+      const contractNames = contracts.map((c) => c.name);
+      const chainHandlers = this.handlerRegistrations.filter((h) =>
+        contractNames.includes(h.contractName)
+      );
+
+      if (chainHandlers.length === 0) {
+        this.logger.warn(`No handlers registered for chain ${chainName}`);
+      } else {
+        processor.registerHandlers(chainHandlers);
+        this.logger.info(
+          `Registered ${chainHandlers.length} handlers for ${chainName}`
+        );
+      }
+
       this.processors.set(chainName, processor);
-      this.logger.info(`Initialized processor for ${chainName}`);
+
+      // Start processor (non-blocking)
+      processor.start().catch((error) => {
+        this.logger.error(`Processor error for ${chainName}`, {
+          error: error as Error,
+        });
+      });
+
+      this.logger.info(`Started processor for ${chainName}`);
     }
   }
 

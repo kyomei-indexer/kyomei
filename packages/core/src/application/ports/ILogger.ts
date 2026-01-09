@@ -23,23 +23,50 @@ export interface LogContext {
 }
 
 /**
+ * Progress information for a single phase
+ */
+export interface PhaseProgress {
+  /** Current progress count */
+  current: number;
+  /** Total expected count */
+  total: number;
+  /** Percentage complete (0-100) */
+  percentage: number;
+  /** Items per second */
+  rate?: number;
+}
+
+/**
  * Progress information for indexing
  */
 export interface ProgressInfo {
-  /** Current block number */
-  currentBlock: bigint;
-  /** Target block number */
-  targetBlock: bigint;
-  /** Start block number */
-  startBlock: bigint;
   /** Chain name */
   chain: string;
+  /** Blocks synced */
+  blocksSynced: number;
+  /** Total blocks to sync */
+  totalBlocks: number;
+  /** Percentage complete (0-100) */
+  percentage: number;
   /** Phase (syncing, processing, etc.) */
   phase: 'syncing' | 'processing' | 'live';
   /** Blocks per second */
   blocksPerSecond?: number;
+  /** Number of workers */
+  workers?: number;
   /** Estimated time remaining (seconds) */
   estimatedTimeRemaining?: number;
+}
+
+/**
+ * Combined progress for all phases
+ */
+export interface CombinedProgress {
+  chain: string;
+  sync?: PhaseProgress;
+  process?: PhaseProgress;
+  status: 'syncing' | 'processing' | 'live';
+  eta?: number;
 }
 
 /**

@@ -1,4 +1,4 @@
-import { pathToFileURL } from 'node:url';
+import { createJiti } from 'jiti';
 import { kyomeiConfigSchema } from './schema.ts';
 import type { KyomeiConfig } from './types.ts';
 
@@ -59,16 +59,19 @@ async function findConfigFile(cwd: string): Promise<string | undefined> {
 
 /**
  * Load configuration from a file path
+ * Uses jiti to support TypeScript config files
  */
 async function loadConfigFile(filePath: string): Promise<unknown> {
-  // Convert to file URL for cross-platform compatibility
-  const fileUrl = pathToFileURL(filePath).href;
+  // Create jiti instance for TypeScript/ESM support
+  const jiti = createJiti(import.meta.url, {
+    interopDefault: true,
+  });
 
-  // Dynamic import for ES modules
-  const module = await import(fileUrl);
+  // Import the config file (works with .ts, .js, .mts, .mjs)
+  const module = await jiti.import(filePath);
 
   // Support both default export and named export
-  return module.default ?? module.config ?? module;
+  return (module as Record<string, unknown>).default ?? (module as Record<string, unknown>).config ?? module;
 }
 
 /**

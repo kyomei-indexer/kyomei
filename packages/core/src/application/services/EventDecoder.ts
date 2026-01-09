@@ -1,6 +1,6 @@
-import type { Abi, AbiEvent } from 'viem';
-import { decodeEventLog, getAbiItem } from 'viem';
-import type { DecodedLog, Log } from '../../domain/entities/Log.ts';
+import type { Abi, AbiEvent } from "viem";
+import { decodeEventLog, getAbiItem, keccak256, toHex } from "viem";
+import type { DecodedLog, Log } from "../../domain/entities/Log.ts";
 
 /**
  * Registered contract ABI with metadata
@@ -17,7 +17,8 @@ interface RegisteredContract {
  */
 export class EventDecoder {
   private contracts: Map<string, RegisteredContract> = new Map();
-  private signatureToContract: Map<`0x${string}`, RegisteredContract[]> = new Map();
+  private signatureToContract: Map<`0x${string}`, RegisteredContract[]> =
+    new Map();
 
   /**
    * Register a contract ABI
@@ -26,7 +27,7 @@ export class EventDecoder {
     const events = new Map<`0x${string}`, AbiEvent>();
 
     for (const item of abi) {
-      if (item.type === 'event') {
+      if (item.type === "event") {
         const event = item as AbiEvent;
         const signature = this.getEventSignature(event);
         events.set(signature, event);
@@ -41,6 +42,25 @@ export class EventDecoder {
     }
 
     this.contracts.set(name, { name, abi, events });
+  }
+
+  /**
+   * Get the event signature (topic0) for a specific event
+   */
+  getEventSignatureByName(
+    contractName: string,
+    eventName: string
+  ): `0x${string}` | null {
+    const contract = this.contracts.get(contractName);
+    if (!contract) return null;
+
+    const eventAbi = getAbiItem({
+      abi: contract.abi,
+      name: eventName,
+    }) as AbiEvent | undefined;
+
+    if (!eventAbi) return null;
+    return this.getEventSignature(eventAbi);
   }
 
   /**
@@ -92,7 +112,7 @@ export class EventDecoder {
 
         return {
           ...log,
-          eventName: decoded.eventName ?? 'Unknown',
+          eventName: decoded.eventName ?? "Unknown",
           args: (decoded.args ?? {}) as unknown as Record<string, unknown>,
         };
       } catch {
@@ -130,7 +150,7 @@ export class EventDecoder {
 
       return {
         ...log,
-        eventName: decoded.eventName ?? 'Unknown',
+        eventName: decoded.eventName ?? "Unknown",
         args: (decoded.args ?? {}) as unknown as Record<string, unknown>,
       };
     } catch {
@@ -157,11 +177,17 @@ export class EventDecoder {
   /**
    * Decode logs for a specific event
    */
-  decodeForEvent(logs: Log[], contractName: string, eventName: string): DecodedLog[] {
+  decodeForEvent(
+    logs: Log[],
+    contractName: string,
+    eventName: string
+  ): DecodedLog[] {
     const contract = this.contracts.get(contractName);
     if (!contract) return [];
 
-    const eventAbi = getAbiItem({ abi: contract.abi, name: eventName }) as AbiEvent | undefined;
+    const eventAbi = getAbiItem({ abi: contract.abi, name: eventName }) as
+      | AbiEvent
+      | undefined;
     if (!eventAbi) return [];
 
     const signature = this.getEventSignature(eventAbi);
@@ -177,28 +203,41 @@ export class EventDecoder {
    */
   private getEventSignature(event: AbiEvent): `0x${string}` {
     // Manual calculation of event signature
-    const params = event.inputs.map((input) => this.getTypeString(input)).join(',');
+    const params = event.inputs
+      .map((input) => this.getTypeString(input))
+      .join(",");
     const signature = `${event.name}(${params})`;
 
-    // Import keccak256 from viem for hashing
-    const { keccak256, toHex } = require('viem');
     return keccak256(toHex(signature));
   }
 
   /**
    * Get type string for parameter (handling tuples)
    */
-  private getTypeString(param: { type: string; components?: readonly unknown[] }): string {
-    if (param.type === 'tuple' && param.components) {
-      const components = (param.components as Array<{ type: string; components?: readonly unknown[] }>)
+  private getTypeString(param: {
+    type: string;
+    components?: readonly unknown[];
+  }): string {
+    if (param.type === "tuple" && param.components) {
+      const components = (
+        param.components as Array<{
+          type: string;
+          components?: readonly unknown[];
+        }>
+      )
         .map((c) => this.getTypeString(c))
-        .join(',');
+        .join(",");
       return `(${components})`;
     }
-    if (param.type.startsWith('tuple') && param.components) {
-      const components = (param.components as Array<{ type: string; components?: readonly unknown[] }>)
+    if (param.type.startsWith("tuple") && param.components) {
+      const components = (
+        param.components as Array<{
+          type: string;
+          components?: readonly unknown[];
+        }>
+      )
         .map((c) => this.getTypeString(c))
-        .join(',');
+        .join(",");
       const suffix = param.type.slice(5);
       return `(${components})${suffix}`;
     }
