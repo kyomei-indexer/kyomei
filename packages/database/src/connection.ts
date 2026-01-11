@@ -169,3 +169,68 @@ export async function isConnected(db: Database): Promise<boolean> {
   const result = await testConnection(db);
   return result.success;
 }
+
+/**
+ * Get connection pool statistics
+ */
+export interface PoolStats {
+  /** Total connections in pool */
+  total: number;
+  /** Idle connections available */
+  idle: number;
+  /** Connections currently in use */
+  active: number;
+}
+
+/**
+ * Get current pool statistics from postgres client
+ */
+export function getPoolStats(client: postgres.Sql): PoolStats {
+  // Access internal pool state - postgres.js exposes this
+  const options = (client as any).options;
+  const busy = (client as any).busy || [];
+
+  // Calculate stats
+  const max = options?.max ?? 100;
+  const activeCount = Array.isArray(busy) ? busy.length : 0;
+  const idleCount = Math.max(0, max - activeCount);
+
+  return {
+    total: max,
+    idle: idleCount,
+    active: activeCount,
+  };
+}
+
+/**
+ * Start monitoring connection pool
+ * @param client Postgres client
+ * @param logger Logger instance (must have debug/warn methods)
+ * @param intervalMs Monitoring interval in milliseconds (default: 30000)
+ * @returns Cleanup function to stop monitoring
+ */
+export function startPoolMonitoring(
+  client: postgres.Sql,
+  logger: { debug: (msg: string, meta?: any) => void; warn: (msg: string, meta?: any) => void },
+  intervalMs = 30000
+): () => void {
+  const interval = setInterval(() => {
+    try {
+      const stats = getPoolStats(client);
+
+      logger.debug('Connection pool stats', stats);
+
+      // Warn if pool is heavily saturated
+      if (stats.idle < stats.total * 0.1) {
+        logger.warn('High connection pool saturation detected', {
+          ...stats,
+          utilizationPercent: Math.round((stats.active / stats.total) * 100),
+        });
+      }
+    } catch (error) {
+      // Silently ignore errors in monitoring
+    }
+  }, intervalMs);
+
+  return () => clearInterval(interval);
+}

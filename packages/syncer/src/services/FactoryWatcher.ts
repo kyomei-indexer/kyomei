@@ -156,41 +156,34 @@ export class FactoryWatcher {
         return false;
       }
 
-      // Store each discovered child
-      let discovered = false;
+      // Prepare records for batch insert (onConflictDoNothing handles duplicates)
+      const records = childAddresses.map(childAddress => ({
+        chainId: this.chainId,
+        factoryAddress: log.address.toLowerCase(),
+        childAddress: childAddress.toLowerCase(),
+        contractName: factory.config.childContractName ?? factory.name,
+        createdAtBlock: log.blockNumber,
+        createdAtTxHash: log.transactionHash,
+        createdAtLogIndex: log.logIndex,
+        metadata: JSON.stringify(decoded.args, (_, value) =>
+          typeof value === 'bigint' ? value.toString() : value
+        ),
+        childAbi: factory.config.childAbi ? JSON.stringify(factory.config.childAbi) : null,
+        createdAt: new Date(),
+      }));
+
+      // Use batch insert - database handles duplicates with onConflictDoNothing
+      await this.factoryRepo.insertBatch(records);
+
       for (const childAddress of childAddresses) {
-        // Check if already registered
-        const existing = await this.factoryRepo.getByAddress(this.chainId, childAddress);
-        if (existing) {
-          continue;
-        }
-
-        // Store the child
-        await this.factoryRepo.insert({
-          chainId: this.chainId,
-          factoryAddress: log.address.toLowerCase(),
-          childAddress: childAddress.toLowerCase(),
-          contractName: factory.config.childContractName ?? factory.name,
-          createdAtBlock: log.blockNumber,
-          createdAtTxHash: log.transactionHash,
-          createdAtLogIndex: log.logIndex,
-          metadata: JSON.stringify(decoded.args, (_, value) =>
-            typeof value === 'bigint' ? value.toString() : value
-          ),
-          childAbi: factory.config.childAbi ? JSON.stringify(factory.config.childAbi) : null,
-          createdAt: new Date(),
-        });
-
         this.logger.debug(`Discovered child contract: ${childAddress}`, {
           factory: factory.name,
           childContractName: factory.config.childContractName ?? factory.name,
           block: log.blockNumber,
         });
-
-        discovered = true;
       }
 
-      return discovered;
+      return childAddresses.length > 0;
     } catch (error) {
       this.logger.error(`Failed to decode factory event`, {
         factory: factory.name,
@@ -246,19 +239,10 @@ export class FactoryWatcher {
 
   /**
    * Get all child addresses across all factories
+   * Uses a single batched query instead of N+1 queries
    */
   async getAllChildAddresses(): Promise<Map<string, string[]>> {
-    const result = new Map<string, string[]>();
-
-    for (const factory of this.factories) {
-      const children = await this.factoryRepo.getChildAddressesByContract(
-        this.chainId,
-        factory.name
-      );
-      result.set(factory.name, children);
-    }
-
-    return result;
+    return this.factoryRepo.getAllChildAddressesByChain(this.chainId);
   }
 
   /**

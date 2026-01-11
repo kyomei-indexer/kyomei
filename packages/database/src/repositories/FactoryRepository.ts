@@ -138,6 +138,27 @@ export class FactoryRepository implements IFactoryRepository {
     return results.map((r) => r.childAddress);
   }
 
+  async getAllChildAddressesByChain(chainId: number): Promise<Map<string, string[]>> {
+    const results = await this.db
+      .select({
+        contractName: factoryChildren.contractName,
+        childAddress: factoryChildren.childAddress,
+      })
+      .from(factoryChildren)
+      .where(eq(factoryChildren.chainId, chainId));
+
+    // Group by contract name
+    const grouped = new Map<string, string[]>();
+    for (const row of results) {
+      if (!grouped.has(row.contractName)) {
+        grouped.set(row.contractName, []);
+      }
+      grouped.get(row.contractName)!.push(row.childAddress);
+    }
+
+    return grouped;
+  }
+
   async isChild(chainId: number, address: string): Promise<boolean> {
     const result = await this.db
       .select({ count: sql<number>`1` })

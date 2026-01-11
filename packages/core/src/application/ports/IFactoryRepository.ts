@@ -80,6 +80,12 @@ export interface IFactoryRepository {
   getChildAddressesByContract(chainId: number, contractName: string): Promise<string[]>;
 
   /**
+   * Get all child addresses grouped by contract name for a chain
+   * More efficient than calling getChildAddressesByContract for each contract
+   */
+  getAllChildAddressesByChain(chainId: number): Promise<Map<string, string[]>>;
+
+  /**
    * Check if address is a known child
    */
   isChild(chainId: number, address: string): Promise<boolean>;
