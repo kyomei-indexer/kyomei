@@ -14,7 +14,7 @@ import type { BlockRange, Log } from '@kyomei/core';
 export class EventRepository implements IEventRepository {
   constructor(private readonly db: Database) {}
 
-  async insertBatch(events: RawEventRecord[]): Promise<void> {
+  async insertBatch(events: RawEventRecord[], batchSize = 10000): Promise<void> {
     if (events.length === 0) return;
 
     const records: NewRawEvent[] = events.map((e) => ({
@@ -33,15 +33,17 @@ export class EventRepository implements IEventRepository {
       data: e.data,
     }));
 
-    // Insert in batches of 1000 for performance
-    const batchSize = 1000;
-    for (let i = 0; i < records.length; i += batchSize) {
-      const batch = records.slice(i, i + batchSize);
-      await this.db
-        .insert(rawEvents)
-        .values(batch)
-        .onConflictDoNothing();
-    }
+    // Wrap all inserts in a single transaction for better performance
+    await this.db.transaction(async (tx) => {
+      // Insert in sub-batches for better memory management
+      for (let i = 0; i < records.length; i += batchSize) {
+        const batch = records.slice(i, i + batchSize);
+        await tx
+          .insert(rawEvents)
+          .values(batch)
+          .onConflictDoNothing();
+      }
+    });
   }
 
   async query(options: EventQueryOptions): Promise<RawEventRecord[]> {

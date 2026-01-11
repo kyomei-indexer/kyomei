@@ -41,9 +41,10 @@ export class ViewCreator {
   ): Promise<void> {
     for (const contract of contracts) {
       const events = this.abiParser.parseEvents(contract.abi);
+      const isFactory = typeof contract.address === 'object' && 'type' in contract.address && contract.address.type === 'factory';
 
       for (const event of events) {
-        await this.createEventView(contract.name, event, chainId);
+        await this.createEventView(contract.name, event, chainId, isFactory);
       }
     }
   }
@@ -54,9 +55,10 @@ export class ViewCreator {
   async createEventView(
     contractName: string,
     event: ParsedEvent,
-    chainId: number
+    chainId: number,
+    isFactory: boolean = false
   ): Promise<void> {
-    const viewName = `${contractName}_${event.name}`.toLowerCase();
+    const viewName = `event_${contractName}_${event.name}`.toLowerCase();
     const fullViewName = `${this.appSchema}.${viewName}`;
 
     // Build column expressions for decoded event data
@@ -86,6 +88,16 @@ export class ViewCreator {
       ...eventColumns,
     ].join(',\n      ');
 
+    // For factory contracts, filter by addresses from factory_children table
+    const addressFilter = isFactory
+      ? `AND address IN (
+          SELECT child_address
+          FROM ${this.syncSchema}.factory_children
+          WHERE chain_id = ${chainId}
+            AND contract_name = '${contractName}'
+        )`
+      : '';
+
     const viewSql = `
     CREATE OR REPLACE VIEW ${fullViewName} AS
     SELECT
@@ -93,6 +105,7 @@ export class ViewCreator {
     FROM ${this.syncSchema}.raw_events
     WHERE chain_id = ${chainId}
       AND topic0 = '${event.signature}'
+      ${addressFilter}
     ORDER BY block_number, tx_index, log_index;
     `;
 
@@ -101,6 +114,7 @@ export class ViewCreator {
       this.logger.debug(`Created view: ${fullViewName}`, {
         event: event.name,
         signature: event.signature,
+        isFactory,
       });
     } catch (error) {
       this.logger.error(`Failed to create view: ${fullViewName}`, {
@@ -117,7 +131,7 @@ export class ViewCreator {
     addresses: string[],
     chainId: number
   ): Promise<void> {
-    const viewName = `${contractName}_events`.toLowerCase();
+    const viewName = `event_${contractName}_all`.toLowerCase();
     const fullViewName = `${this.appSchema}.${viewName}`;
 
     const addressList = addresses.map((a) => `'${a.toLowerCase()}'`).join(', ');

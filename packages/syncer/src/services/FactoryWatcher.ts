@@ -144,42 +144,53 @@ export class FactoryWatcher {
         strict: false,
       });
 
-      // Extract child address from the specified parameter
-      const childAddress = (decoded.args as Record<string, unknown>)[factory.config.parameter] as string;
+      // Extract child addresses from parameter(s) - supports single or multiple
+      const childAddresses = this.extractChildAddresses(decoded, factory);
 
-      if (!childAddress || typeof childAddress !== 'string') {
-        this.logger.warn(`Could not extract child address from ${factory.config.parameter}`, {
+      if (childAddresses.length === 0) {
+        this.logger.warn(`Could not extract child addresses from parameters`, {
           event: factory.config.event.name,
+          parameters: factory.config.parameter,
           args: decoded.args,
         });
         return false;
       }
 
-      // Check if already registered
-      const existing = await this.factoryRepo.getByAddress(this.chainId, childAddress);
-      if (existing) {
-        return false;
+      // Store each discovered child
+      let discovered = false;
+      for (const childAddress of childAddresses) {
+        // Check if already registered
+        const existing = await this.factoryRepo.getByAddress(this.chainId, childAddress);
+        if (existing) {
+          continue;
+        }
+
+        // Store the child
+        await this.factoryRepo.insert({
+          chainId: this.chainId,
+          factoryAddress: log.address.toLowerCase(),
+          childAddress: childAddress.toLowerCase(),
+          contractName: factory.config.childContractName ?? factory.name,
+          createdAtBlock: log.blockNumber,
+          createdAtTxHash: log.transactionHash,
+          createdAtLogIndex: log.logIndex,
+          metadata: JSON.stringify(decoded.args, (_, value) =>
+            typeof value === 'bigint' ? value.toString() : value
+          ),
+          childAbi: factory.config.childAbi ? JSON.stringify(factory.config.childAbi) : null,
+          createdAt: new Date(),
+        });
+
+        this.logger.debug(`Discovered child contract: ${childAddress}`, {
+          factory: factory.name,
+          childContractName: factory.config.childContractName ?? factory.name,
+          block: log.blockNumber,
+        });
+
+        discovered = true;
       }
 
-      // Store the child
-      await this.factoryRepo.insert({
-        chainId: this.chainId,
-        factoryAddress: log.address.toLowerCase(),
-        childAddress: childAddress.toLowerCase(),
-        contractName: factory.name,
-        createdAtBlock: log.blockNumber,
-        createdAtTxHash: log.transactionHash,
-        createdAtLogIndex: log.logIndex,
-        metadata: JSON.stringify(decoded.args),
-        createdAt: new Date(),
-      });
-
-      this.logger.debug(`Discovered child contract: ${childAddress}`, {
-        factory: factory.name,
-        block: log.blockNumber,
-      });
-
-      return true;
+      return discovered;
     } catch (error) {
       this.logger.error(`Failed to decode factory event`, {
         factory: factory.name,
@@ -187,6 +198,43 @@ export class FactoryWatcher {
       });
       return false;
     }
+  }
+
+  /**
+   * Extract child addresses from decoded event args
+   * Supports single parameter, multiple parameters, and array values
+   */
+  private extractChildAddresses(
+    decoded: any,
+    factory: FactoryContract
+  ): string[] {
+    const parameters = Array.isArray(factory.config.parameter)
+      ? factory.config.parameter
+      : [factory.config.parameter];
+
+    const addresses: string[] = [];
+
+    // Cast args to record - viem returns either array or object
+    const args = decoded.args as unknown as Record<string, unknown>;
+
+    for (const param of parameters) {
+      const value = args[param];
+
+      // Handle single address (string)
+      if (typeof value === 'string' && value.startsWith('0x')) {
+        addresses.push(value);
+      }
+      // Handle array of addresses
+      else if (Array.isArray(value)) {
+        for (const item of value) {
+          if (typeof item === 'string' && item.startsWith('0x')) {
+            addresses.push(item);
+          }
+        }
+      }
+    }
+
+    return addresses;
   }
 
   /**

@@ -24,6 +24,7 @@
     "@kyomei/config": "workspace:*",
     "@kyomei/core": "workspace:*",
     "@kyomei/database": "workspace:*",
+    "@kyomei/events": "workspace:*",
     "drizzle-orm": "^0.39.3",
     "viem": "^2.21.54"
   },

@@ -111,11 +111,23 @@ export class Logger implements ILogger {
       this.chainProgress.set(info.chain, state);
     }
 
+    // For processing phase, prioritize event counts over block counts
+    const isProcessing = info.phase === 'processing';
+    const current = isProcessing && info.eventsProcessed !== undefined
+      ? info.eventsProcessed
+      : info.blocksSynced;
+    const total = isProcessing && info.totalEvents !== undefined
+      ? info.totalEvents
+      : info.totalBlocks;
+    const rate = isProcessing && info.eventsPerSecond !== undefined
+      ? info.eventsPerSecond
+      : info.blocksPerSecond;
+
     const phaseData: PhaseProgress & { startTime: number } = {
-      current: info.blocksSynced,
-      total: info.totalBlocks,
+      current,
+      total,
       percentage: Math.min(100, Math.max(0, info.percentage)),
-      rate: info.blocksPerSecond,
+      rate,
       startTime: state[info.phase === 'syncing' ? 'sync' : 'process']?.startTime ?? now,
     };
 

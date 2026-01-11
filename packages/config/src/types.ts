@@ -74,8 +74,12 @@ export interface FactoryConfig {
   address: `0x${string}`;
   /** ABI event that creates child contracts */
   event: AbiEvent;
-  /** Parameter name containing the child address */
-  parameter: string;
+  /** Parameter name(s) containing the child address(es) - supports single or multiple */
+  parameter: string | string[];
+  /** Optional: Custom ABI for child contracts (overrides contract's default ABI) */
+  childAbi?: Abi;
+  /** Optional: Custom contract name for children (overrides parent contract name) */
+  childContractName?: string;
 }
 
 /**
@@ -92,7 +96,9 @@ export type AddressConfig =
 export function factory(config: {
   address: `0x${string}`;
   event: AbiEvent;
-  parameter: string;
+  parameter: string | string[];
+  childAbi?: Abi;
+  childContractName?: string;
 }): FactoryConfig {
   return { type: 'factory', ...config };
 }
@@ -359,6 +365,37 @@ export interface LoggingConfig {
 // ============================================================================
 
 /**
+ * Performance tuning configuration
+ */
+export interface PerformanceConfig {
+  // Database settings
+  /** Maximum database connection pool size (default: 100) */
+  connectionPoolSize?: number;
+  /** Batch size for event inserts (default: 10000) */
+  insertBatchSize?: number;
+
+  // Sync settings
+  /** Number of parallel workers for historical sync (default: 4) */
+  parallelWorkers?: number;
+  /** Event buffer size before flush (default: 10000) */
+  eventBufferSize?: number;
+  /** Blocks between progress checkpoints (default: 100) */
+  checkpointInterval?: number;
+
+  // Processor settings
+  /** Event batch size for processor (default: 1000) */
+  processorBatchSize?: number;
+  /** Max concurrent parallel handlers (default: 50) */
+  processorConcurrency?: number;
+
+  // RPC settings
+  /** Max concurrent RPC calls (default: 100) */
+  rpcConcurrency?: number;
+  /** RPC batch call size (default: 100) */
+  rpcBatchSize?: number;
+}
+
+/**
  * Complete Kyomei indexer configuration
  */
 export interface KyomeiConfig {
@@ -374,6 +411,8 @@ export interface KyomeiConfig {
   backup?: BackupConfig;
   /** Logging configuration */
   logging?: LoggingConfig;
+  /** Performance tuning */
+  performance?: PerformanceConfig;
   /** API server configuration */
   api?: {
     port?: number;

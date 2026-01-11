@@ -3,6 +3,8 @@ export {
   createConnection,
   closeConnection,
   testConnection,
+  isConnected,
+  DatabaseConnectionError,
 } from "./connection.ts";
 export type { Database, Schema, ConnectionOptions } from "./connection.ts";
 

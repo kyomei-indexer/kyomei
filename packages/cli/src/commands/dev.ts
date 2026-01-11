@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { createJiti } from "jiti";
 import { loadConfig } from "@kyomei/config";
 import { createLogger } from "@kyomei/core";
-import { createConnection, MigrationRunner, SchemaManager } from "@kyomei/database";
+import { createConnection, testConnection, MigrationRunner, SchemaManager } from "@kyomei/database";
 import type { HandlerRegistration } from "@kyomei/processor";
 
 /**
@@ -42,10 +42,26 @@ export async function devCommand(options: DevOptions): Promise<void> {
     });
 
     // Connect to database
+    logger.info("Connecting to database...");
     const { db, client } = createConnection({
       connectionString: config.database.connectionString,
       maxConnections: config.database.poolSize,
     });
+
+    // Test connection with helpful error messages
+    const connectionResult = await testConnection(db, config.database.connectionString);
+    if (!connectionResult.success) {
+      logger.error(`Database connection failed: ${connectionResult.error}`);
+      if (connectionResult.details) {
+        // Log each line of details separately for better formatting
+        for (const line of connectionResult.details.split('\n')) {
+          logger.error(line.trim());
+        }
+      }
+      await client.end();
+      process.exit(1);
+    }
+    logger.info("Database connected");
 
     // Run migrations
     logger.info("Running database migrations...");
@@ -172,6 +188,7 @@ export async function devCommand(options: DevOptions): Promise<void> {
     const runner = new ServiceRunner({
       config,
       db,
+      client,
       logger,
       services,
       handlerRegistrations,

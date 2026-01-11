@@ -16,6 +16,7 @@ export const factoryChildren = syncSchema.table(
     createdAtTxHash: varchar('created_at_tx_hash', { length: 66 }).notNull(),
     createdAtLogIndex: integer('created_at_log_index').notNull(),
     metadata: text('metadata'), // JSON-encoded event parameters
+    childAbi: text('child_abi'), // JSON-encoded custom ABI for child contracts
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

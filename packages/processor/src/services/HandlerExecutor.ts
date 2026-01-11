@@ -1,6 +1,5 @@
 import type {
   ILogger,
-  IProcessCheckpointRepository,
   IProcessWorkerRepository,
   ISyncWorkerRepository,
   ICachedRpcClient,
@@ -11,6 +10,7 @@ import type {
 import { EventDecoder } from "@kyomei/core";
 import type { ContractConfig } from "@kyomei/config";
 import type { Database } from "@kyomei/database";
+import type { EventListener } from "@kyomei/events";
 import { sql } from "drizzle-orm";
 
 // Import handler types from Kyomei.ts
@@ -58,13 +58,14 @@ export interface HandlerExecutorOptions {
   db: Database;
   appSchema: string;
   eventRepository: IEventRepository;
-  checkpointRepository: IProcessCheckpointRepository;
   workerRepository: IProcessWorkerRepository;
   syncWorkerRepository: ISyncWorkerRepository;
   /** RPC client for contract reads (optional - handlers using context.rpc will fail if not provided) */
   rpcClient?: ICachedRpcClient;
+  eventListener?: EventListener;
   logger: ILogger;
   batchSize?: number;
+  parallelConcurrency?: number;
   onProgress?: (info: ProcessProgress) => void;
 }
 
@@ -79,10 +80,10 @@ export class HandlerExecutor {
   private readonly db: Database;
   private readonly appSchema: string;
   private readonly eventRepo: IEventRepository;
-  private readonly checkpointRepo: IProcessCheckpointRepository;
   private readonly workerRepo: IProcessWorkerRepository;
   private readonly syncWorkerRepo: ISyncWorkerRepository;
   private readonly rpcClient?: ICachedRpcClient;
+  private readonly eventListener?: EventListener;
   private readonly logger: ILogger;
   private readonly batchSize: number;
   private readonly eventDecoder = new EventDecoder();
@@ -95,7 +96,7 @@ export class HandlerExecutor {
   // Parallel processing configuration
   // With 100 concurrent RPC calls and ~4 calls per event, aim for ~50 concurrent handlers
   // to maximize throughput while leaving some headroom
-  private readonly parallelConcurrency = 50;
+  private readonly parallelConcurrency: number;
 
   private isRunning = false;
   private abortController: AbortController | null = null;
@@ -104,6 +105,7 @@ export class HandlerExecutor {
   private eventsThisSession = 0;
   private lastProgressUpdate: number = 0;
   private readonly progressThrottleMs = 500;
+  private wakeSignal = { notified: false };
 
   // Topic0 to contract name lookup for fast event matching
   private readonly topic0ToContract: Map<string, string> = new Map();
@@ -115,10 +117,10 @@ export class HandlerExecutor {
     this.db = options.db;
     this.appSchema = options.appSchema;
     this.eventRepo = options.eventRepository;
-    this.checkpointRepo = options.checkpointRepository;
     this.workerRepo = options.workerRepository;
     this.syncWorkerRepo = options.syncWorkerRepository;
     this.rpcClient = options.rpcClient;
+    this.eventListener = options.eventListener;
     this.logger = options.logger.child({
       module: "HandlerExecutor",
       chain: options.chainName,
@@ -126,6 +128,7 @@ export class HandlerExecutor {
     // Batch size in number of events (not blocks!)
     // Moderate size for good throughput while saving progress regularly
     this.batchSize = options.batchSize ?? 1000;
+    this.parallelConcurrency = options.parallelConcurrency ?? 50;
     this.onProgress = options.onProgress;
 
     // Register contract ABIs and build topic0 lookup
@@ -193,6 +196,16 @@ export class HandlerExecutor {
     this.logger.info("Starting handler executor");
 
     try {
+      // Setup event listener for sync notifications
+      if (this.eventListener) {
+        await this.eventListener.listen('sync_events', (event) => {
+          if (event.chainId === this.chainId) {
+            this.wakeSignal.notified = true;
+          }
+        });
+        this.logger.debug("Event listener registered for sync notifications");
+      }
+
       // Wait for sync to have data before processing
       await this.waitForSyncData();
 
@@ -240,17 +253,23 @@ export class HandlerExecutor {
 
     while (!this.abortController?.signal.aborted) {
       const syncWorker = await this.syncWorkerRepo.getLiveWorker(this.chainId);
+
+      // Only start processing once historical sync is complete and we're in live mode
+      if (syncWorker) {
+        this.logger.info("Historical sync complete, starting processing");
+        return;
+      }
+
       const historicalWorkers = await this.syncWorkerRepo.getHistoricalWorkers(
         this.chainId
       );
 
-      // If there's a live worker or historical workers with progress, we can start
-      if (syncWorker || historicalWorkers.length > 0) {
-        this.logger.info("Sync data available, starting processing");
-        return;
+      if (historicalWorkers.length > 0) {
+        this.logger.debug("Historical sync in progress, waiting for completion...");
+      } else {
+        this.logger.debug("Waiting for sync to start...");
       }
 
-      this.logger.debug("Waiting for sync data...");
       await this.sleep(pollInterval);
     }
   }
@@ -259,10 +278,14 @@ export class HandlerExecutor {
    * Main processing loop
    */
   private async processLoop(): Promise<void> {
-    const pollInterval = 1000;
+    const pollInterval = 5000; // Increased to 5s since we have event notifications
 
     while (!this.abortController?.signal.aborted) {
       try {
+        // Wait for notification or timeout
+        await this.waitForEvent(pollInterval);
+        this.wakeSignal.notified = false;
+
         // Get sync status to determine target block
         const syncWorker = await this.syncWorkerRepo.getLiveWorker(
           this.chainId
@@ -283,7 +306,6 @@ export class HandlerExecutor {
         }
 
         if (targetBlock === 0n) {
-          await this.sleep(pollInterval);
           continue;
         }
 
@@ -315,8 +337,7 @@ export class HandlerExecutor {
           if (isLive && processWorker.status !== "live") {
             await this.transitionToLive(processWorker, targetBlock);
           }
-          // In live mode, just poll for new blocks
-          await this.sleep(pollInterval);
+          // In live mode, wait for next notification
           continue;
         }
 
@@ -330,7 +351,6 @@ export class HandlerExecutor {
       } catch (error) {
         if (this.abortController?.signal.aborted) break;
         this.logger.error("Processing error", { error: error as Error });
-        await this.sleep(pollInterval);
       }
     }
   }
@@ -607,53 +627,6 @@ export class HandlerExecutor {
     return startBlocks.length > 0
       ? BigInt(Math.min(...startBlocks.map(Number)))
       : 0n;
-  }
-
-  /**
-   * Process events from checkpoint to target block (legacy method for backwards compatibility)
-   */
-  async process(targetBlock: bigint): Promise<number> {
-    const checkpoint = await this.checkpointRepo.get(this.chainId);
-    const startBlock = checkpoint?.blockNumber ?? 0n;
-
-    if (startBlock >= targetBlock) {
-      return 0;
-    }
-
-    this.logger.info(
-      `Processing events from block ${startBlock} to ${targetBlock}`
-    );
-
-    let processed = 0;
-    let currentBlock = startBlock;
-
-    while (currentBlock < targetBlock) {
-      const batchEnd = currentBlock + BigInt(this.batchSize);
-      const endBlock = batchEnd > targetBlock ? targetBlock : batchEnd;
-
-      const events = await this.eventRepo.query({
-        chainId: this.chainId,
-        blockRange: { from: currentBlock + 1n, to: endBlock },
-        order: "asc",
-      });
-
-      for (const event of events) {
-        const count = await this.processEvent(event);
-        processed += count;
-      }
-
-      // Update checkpoint
-      await this.checkpointRepo.set({
-        chainId: this.chainId,
-        blockNumber: endBlock,
-        updatedAt: new Date(),
-      });
-
-      currentBlock = endBlock;
-    }
-
-    this.logger.info(`Processed ${processed} events`);
-    return processed;
   }
 
   /**
@@ -958,5 +931,17 @@ export class HandlerExecutor {
    */
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Wait for sync notification or timeout
+   * Checks wake signal periodically for fast response to notifications
+   */
+  private async waitForEvent(timeoutMs: number): Promise<void> {
+    const start = Date.now();
+    while (!this.wakeSignal.notified && Date.now() - start < timeoutMs) {
+      if (this.abortController?.signal.aborted) break;
+      await this.sleep(100); // Check every 100ms
+    }
   }
 }

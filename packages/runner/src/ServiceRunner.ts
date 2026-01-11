@@ -4,7 +4,6 @@ import {
   EventRepository,
   SyncWorkerRepository,
   ProcessWorkerRepository,
-  ProcessCheckpointRepository,
   FactoryRepository,
   RpcCacheRepository,
 } from "@kyomei/database";
@@ -16,9 +15,11 @@ import {
   HyperSyncBlockSource,
   CachedRpcClient,
 } from "@kyomei/core";
-import { ChainSyncer, FactoryWatcher, ViewCreator } from "@kyomei/syncer";
+import { ChainSyncer, ViewCreator } from "@kyomei/syncer";
 import { HandlerExecutor, type HandlerRegistration } from "@kyomei/processor";
 import { CronScheduler } from "@kyomei/cron";
+import { EventNotifier, EventListener } from "@kyomei/events";
+import type postgres from "postgres";
 
 /**
  * Service runner options
@@ -26,6 +27,7 @@ import { CronScheduler } from "@kyomei/cron";
 export interface ServiceRunnerOptions {
   config: KyomeiConfig;
   db: Database;
+  client: postgres.Sql;
   logger: ILogger;
   services: {
     syncer: boolean;
@@ -43,6 +45,7 @@ export interface ServiceRunnerOptions {
 export class ServiceRunner {
   private readonly config: KyomeiConfig;
   private readonly db: Database;
+  private readonly client: postgres.Sql;
   private readonly logger: ILogger;
   private readonly services: ServiceRunnerOptions["services"];
   private readonly handlerRegistrations: HandlerRegistration[];
@@ -51,13 +54,15 @@ export class ServiceRunner {
   private readonly eventRepo: EventRepository;
   private readonly syncWorkerRepo: SyncWorkerRepository;
   private readonly processWorkerRepo: ProcessWorkerRepository;
-  private readonly processCheckpointRepo: ProcessCheckpointRepository;
   private readonly factoryRepo: FactoryRepository;
   private readonly rpcCacheRepo: RpcCacheRepository;
 
+  // Event-driven communication
+  private readonly eventNotifier: EventNotifier;
+  private readonly eventListener: EventListener;
+
   // Services
   private syncers: Map<string, ChainSyncer> = new Map();
-  private factoryWatchers: Map<string, FactoryWatcher> = new Map();
   private processors: Map<string, HandlerExecutor> = new Map();
   private cronScheduler?: CronScheduler;
   private viewCreator: ViewCreator;
@@ -71,6 +76,7 @@ export class ServiceRunner {
   constructor(options: ServiceRunnerOptions) {
     this.config = options.config;
     this.db = options.db;
+    this.client = options.client;
     this.logger = options.logger;
     this.services = options.services;
     this.handlerRegistrations = options.handlerRegistrations ?? [];
@@ -79,9 +85,12 @@ export class ServiceRunner {
     this.eventRepo = new EventRepository(this.db);
     this.syncWorkerRepo = new SyncWorkerRepository(this.db);
     this.processWorkerRepo = new ProcessWorkerRepository(this.db);
-    this.processCheckpointRepo = new ProcessCheckpointRepository(this.db);
     this.factoryRepo = new FactoryRepository(this.db);
     this.rpcCacheRepo = new RpcCacheRepository(this.db);
+
+    // Initialize event-driven communication
+    this.eventNotifier = new EventNotifier(this.client);
+    this.eventListener = new EventListener(this.client);
 
     // Initialize view creator
     this.viewCreator = new ViewCreator({
@@ -257,18 +266,7 @@ export class ServiceRunner {
         continue;
       }
 
-      // Create factory watcher
-      const factoryWatcher = new FactoryWatcher({
-        chainId: chainConfig.id,
-        chainName,
-        contracts,
-        blockSource,
-        factoryRepository: this.factoryRepo,
-        logger: this.logger,
-      });
-      this.factoryWatchers.set(chainName, factoryWatcher);
-
-      // Create syncer
+      // Create syncer (factory watcher is integrated inside ChainSyncer)
       const syncer = new ChainSyncer({
         chainId: chainConfig.id,
         chainName,
@@ -277,6 +275,8 @@ export class ServiceRunner {
         blockSource,
         eventRepository: this.eventRepo,
         workerRepository: this.syncWorkerRepo,
+        factoryRepository: this.factoryRepo,
+        eventNotifier: this.eventNotifier,
         logger: this.logger,
         onProgress: (progress) => {
           this.logger.progress({
@@ -351,19 +351,20 @@ export class ServiceRunner {
         db: this.db,
         appSchema: this.config.database.appSchema ?? "kyomei_app",
         eventRepository: this.eventRepo,
-        checkpointRepository: this.processCheckpointRepo,
         workerRepository: this.processWorkerRepo,
         syncWorkerRepository: this.syncWorkerRepo,
         rpcClient: cachedRpc ?? undefined,
+        eventListener: this.eventListener,
         logger: this.logger,
         onProgress: (progress) => {
           this.logger.progress({
             chain: progress.chainName,
             blocksSynced: progress.blocksProcessed,
             totalBlocks: progress.totalBlocks,
+            eventsProcessed: progress.eventsProcessed,
             percentage: progress.percentage,
             phase: progress.status === "processing" ? "processing" : "live",
-            blocksPerSecond: progress.eventsPerSecond,
+            eventsPerSecond: progress.eventsPerSecond,
             workers: 1,
             estimatedTimeRemaining: undefined,
           });

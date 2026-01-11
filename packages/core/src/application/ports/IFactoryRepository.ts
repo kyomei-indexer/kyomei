@@ -19,6 +19,8 @@ export interface FactoryChildRecord {
   createdAtLogIndex: number;
   /** Decoded event parameters (JSON) */
   metadata: string | null;
+  /** Custom ABI for child contract (JSON, optional) */
+  childAbi: string | null;
   /** When the record was inserted */
   createdAt: Date;
 }

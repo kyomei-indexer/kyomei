@@ -2,6 +2,7 @@ version: '3.8'
 
 services:
   # TimescaleDB - Primary database with time-series extensions
+  # Optimized for Kyomei v2.0 with high concurrency (100+ connections)
   timescaledb:
     image: timescale/timescaledb:latest-pg16
     container_name: kyomei-timescaledb
@@ -15,11 +16,53 @@ services:
     volumes:
       - timescaledb_data:/var/lib/postgresql/data
       - ./init-scripts:/docker-entrypoint-initdb.d
+    # PostgreSQL configuration tuned for Kyomei
+    command:
+      - "postgres"
+      - "-c"
+      - "max_connections=200"                     # Support 100 pool + buffer
+      - "-c"
+      - "shared_buffers=256MB"                    # Memory for caching
+      - "-c"
+      - "effective_cache_size=1GB"                # OS cache estimate
+      - "-c"
+      - "maintenance_work_mem=64MB"               # For VACUUM, CREATE INDEX
+      - "-c"
+      - "work_mem=4MB"                            # Per-operation memory
+      - "-c"
+      - "max_parallel_workers_per_gather=4"       # Parallel query workers
+      - "-c"
+      - "max_parallel_workers=8"                  # Total parallel workers
+      - "-c"
+      - "max_worker_processes=8"                  # Background workers
+      - "-c"
+      - "checkpoint_completion_target=0.9"        # Spread out checkpoints
+      - "-c"
+      - "wal_buffers=16MB"                        # WAL buffering
+      - "-c"
+      - "default_statistics_target=100"           # Query planner statistics
+      - "-c"
+      - "random_page_cost=1.1"                    # Assume SSD storage
+      - "-c"
+      - "effective_io_concurrency=200"            # Concurrent I/O operations
+      - "-c"
+      - "min_wal_size=1GB"                        # Minimum WAL size
+      - "-c"
+      - "max_wal_size=4GB"                        # Maximum WAL size
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U kyomei -d kyomei"]
       interval: 10s
       timeout: 5s
       retries: 5
+    # Resource limits for development (adjust for production)
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 2G
+        reservations:
+          cpus: '2'
+          memory: 1G
 
   # LocalStack - S3-compatible storage for backups
   localstack:

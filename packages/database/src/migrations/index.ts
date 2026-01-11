@@ -9,6 +9,8 @@ import * as m0004 from './0004_create_crons_tables.ts';
 import * as m0005 from './0005_create_worker_checkpoints.ts';
 import * as m0006 from './0006_unified_sync_workers.ts';
 import * as m0007 from './0007_create_process_workers.ts';
+import * as m0008 from './0008_add_processor_index.ts';
+import * as m0009 from './0009_add_child_abi_column.ts';
 
 /**
  * Migration definition
@@ -31,6 +33,8 @@ export const migrations: Migration[] = [
   { version: 5, name: '0005_create_worker_checkpoints', ...m0005.migration },
   { version: 6, name: '0006_unified_sync_workers', ...m0006.migration },
   { version: 7, name: '0007_create_process_workers', ...m0007.migration },
+  { version: 8, name: '0008_add_processor_index', ...m0008.migration },
+  { version: 9, name: '0009_add_child_abi_column', ...m0009.migration },
 ];
 
 /**

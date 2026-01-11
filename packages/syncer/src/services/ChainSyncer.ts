@@ -2,21 +2,25 @@ import type {
   IBlockSource,
   IEventRepository,
   ISyncWorkerRepository,
+  IFactoryRepository,
   ILogger,
   BlockWithLogs,
   Log,
   SyncWorker,
+  RawEventRecord,
 } from "@kyomei/core";
 import type { ChainConfig, ContractConfig, SyncConfig } from "@kyomei/config";
+import type { EventNotifier } from "@kyomei/events";
+import { FactoryWatcher } from "./FactoryWatcher.ts";
 
 /**
  * Default sync configuration values
  */
 const DEFAULT_SYNC_CONFIG: Required<SyncConfig> = {
-  parallelWorkers: 1,
-  blockRangePerRequest: 1000,
-  blocksPerWorker: 100000,
-  eventBatchSize: 1000,
+  parallelWorkers: 4,           // Increased from 1 to 4 for 4x faster historical sync
+  blockRangePerRequest: 1000,   // Keep for RPC sources
+  blocksPerWorker: 250000,      // Increased from 100k to 250k for larger chunks per worker
+  eventBatchSize: 10000,        // Increased from 1k to 10k for 10x larger batches
 };
 
 /**
@@ -40,7 +44,9 @@ export interface ChainSyncerOptions {
   blockSource: IBlockSource;
   eventRepository: IEventRepository;
   workerRepository: ISyncWorkerRepository;
+  factoryRepository: IFactoryRepository;
   logger: ILogger;
+  eventNotifier?: EventNotifier;
   batchSize?: number;
   onProgress?: (info: SyncProgress) => void;
 }
@@ -104,9 +110,11 @@ export class ChainSyncer {
   private readonly eventRepo: IEventRepository;
   private readonly workerRepo: ISyncWorkerRepository;
   private readonly logger: ILogger;
+  private readonly eventNotifier?: EventNotifier;
   private readonly batchSize: number;
   private readonly onProgress?: (info: SyncProgress) => void;
   private readonly syncConfig: Required<SyncConfig>;
+  private readonly factoryWatcher: FactoryWatcher;
 
   private isRunning = false;
   private abortController: AbortController | null = null;
@@ -115,6 +123,10 @@ export class ChainSyncer {
   private eventsStored = 0;
   private blocksThisSession = 0;
   private workerStates: Map<number, WorkerState> = new Map();
+
+  // Event buffering for cross-block batching (performance optimization)
+  private eventBuffer: RawEventRecord[] = [];
+  private readonly eventBufferSize = 10000;
 
   // Overall sync range for progress calculation
   private syncStartBlock: bigint = 0n;
@@ -131,6 +143,7 @@ export class ChainSyncer {
     this.eventRepo = options.eventRepository;
     this.workerRepo = options.workerRepository;
     this.logger = options.logger.child({ chain: options.chainName });
+    this.eventNotifier = options.eventNotifier;
     this.batchSize = options.batchSize ?? 100;
     this.onProgress = options.onProgress;
 
@@ -154,10 +167,21 @@ export class ChainSyncer {
         DEFAULT_SYNC_CONFIG.eventBatchSize,
     };
 
+    // Initialize factory watcher for discovering child contracts
+    this.factoryWatcher = new FactoryWatcher({
+      chainId: options.chainId,
+      chainName: options.chainName,
+      contracts: options.contracts,
+      blockSource: options.blockSource,
+      factoryRepository: options.factoryRepository,
+      logger: options.logger,
+    });
+
     this.logger.debug("Sync configuration", {
       parallelWorkers: this.syncConfig.parallelWorkers,
       blockRangePerRequest: this.syncConfig.blockRangePerRequest,
       blocksPerWorker: this.syncConfig.blocksPerWorker,
+      hasFactories: this.factoryWatcher.hasFactories(),
     });
   }
 
@@ -232,6 +256,7 @@ export class ChainSyncer {
             }
           );
 
+          // Sync events and discover factories in parallel (single pass)
           const useParallel =
             this.syncConfig.parallelWorkers > 1 &&
             totalBlocks > BigInt(this.syncConfig.blocksPerWorker);
@@ -702,8 +727,9 @@ export class ChainSyncer {
         : "none",
     });
 
-    // Build log filter for contracts
-    const addresses = this.getContractAddresses();
+    // Build log filter for contracts (includes factory children)
+    const addresses = await this.getContractAddresses();
+    const addressSet = new Set(addresses.map(a => a.toLowerCase()));
     const filter =
       addresses.length > 0
         ? {
@@ -737,13 +763,16 @@ export class ChainSyncer {
         break;
       }
 
-      await this.processBlockForWorker(blockWithLogs, state);
+      await this.processBlockForWorker(blockWithLogs, state, addressSet);
       state.currentBlock = blockWithLogs.block.number;
       state.blocksProcessed++;
       this.blocksThisSession++;
 
       // Save worker progress periodically (per worker, not global)
       if (state.blocksProcessed % this.batchSize === 0) {
+        // Flush buffer before saving checkpoint
+        await this.flushEventBuffer(state);
+
         await this.saveWorkerProgress(
           chunk.workerId,
           rangeStart,
@@ -758,6 +787,9 @@ export class ChainSyncer {
 
     // Only mark as complete if we weren't aborted
     if (!wasAborted) {
+      // Flush any remaining events in buffer
+      await this.flushEventBuffer(state);
+
       state.isComplete = true;
 
       // Worker completed - delete it (completed workers are removed)
@@ -803,24 +835,45 @@ export class ChainSyncer {
    */
   private async processBlockForWorker(
     blockWithLogs: BlockWithLogs,
-    state: WorkerState
+    state: WorkerState,
+    knownAddresses: Set<string>
   ): Promise<void> {
     const { block, logs } = blockWithLogs;
 
     if (logs.length === 0) return;
 
+    // Discover any new factory children in this block
+    if (this.factoryWatcher.hasFactories()) {
+      for (const log of logs) {
+        const discovered = await this.factoryWatcher.processLog(log);
+        // If we discovered a new child, add it to known addresses for this block
+        if (discovered) {
+          const childAddresses = await this.factoryWatcher.getAllChildAddresses();
+          for (const addresses of childAddresses.values()) {
+            for (const addr of addresses) {
+              knownAddresses.add(addr.toLowerCase());
+            }
+          }
+        }
+      }
+    }
+
     // Filter logs for our contracts
-    const relevantLogs = this.filterRelevantLogs(logs);
+    const relevantLogs = this.filterRelevantLogs(logs, knownAddresses);
 
     if (relevantLogs.length === 0) return;
 
-    // Convert to records and insert
+    // Convert to records and add to buffer (cross-block batching)
     const records = relevantLogs.map((log) =>
       this.eventRepo.logToRecord(log as Log, this.chainId)
     );
 
-    await this.eventRepo.insertBatch(records);
-    state.eventsStored += records.length;
+    this.eventBuffer.push(...records);
+
+    // Flush buffer if it reaches the threshold
+    if (this.eventBuffer.length >= this.eventBufferSize) {
+      await this.flushEventBuffer(state);
+    }
 
     this.logger.trace(
       `Worker ${state.workerId} processed block ${block.number}`,
@@ -830,6 +883,36 @@ export class ChainSyncer {
         events: records.length,
       }
     );
+  }
+
+  /**
+   * Flush event buffer to database (cross-block batching optimization)
+   */
+  private async flushEventBuffer(state: WorkerState): Promise<void> {
+    if (this.eventBuffer.length === 0) return;
+
+    await this.eventRepo.insertBatch(this.eventBuffer);
+    state.eventsStored += this.eventBuffer.length;
+
+    this.logger.trace(
+      `Flushed event buffer: ${this.eventBuffer.length} events`,
+      {
+        worker: state.workerId,
+        events: this.eventBuffer.length,
+      }
+    );
+
+    this.eventBuffer = [];
+
+    // Notify processor that new events are available
+    if (this.eventNotifier) {
+      await this.eventNotifier.notify('sync_events', {
+        type: 'block_range_synced',
+        chainId: this.chainId,
+        blockNumber: state.currentBlock,
+        timestamp: new Date(),
+      });
+    }
   }
 
   /**
@@ -915,8 +998,9 @@ export class ChainSyncer {
       updatedAt: now,
     });
 
-    // Build log filter for contracts
-    const addresses = this.getContractAddresses();
+    // Build log filter for contracts (includes factory children)
+    const addresses = await this.getContractAddresses();
+    const addressSet = new Set(addresses.map(a => a.toLowerCase()));
     const filter =
       addresses.length > 0
         ? { address: addresses as `0x${string}`[], fromBlock, toBlock }
@@ -929,7 +1013,7 @@ export class ChainSyncer {
     )) {
       if (this.abortController?.signal.aborted) break;
 
-      await this.processBlock(blockWithLogs);
+      await this.processBlock(blockWithLogs, addressSet);
       currentBlock = blockWithLogs.block.number;
       this.blocksProcessed++;
       this.blocksThisSession++;
@@ -974,7 +1058,18 @@ export class ChainSyncer {
         return;
       }
 
-      await this.processBlock(blockWithLogs);
+      // Get addresses dynamically in live mode (may have new children)
+      const addresses = await this.getContractAddresses();
+      const addressSet = new Set(addresses.map(a => a.toLowerCase()));
+
+      // Discover any new children in this block
+      if (this.factoryWatcher.hasFactories()) {
+        for (const log of blockWithLogs.logs) {
+          await this.factoryWatcher.processLog(log);
+        }
+      }
+
+      await this.processBlock(blockWithLogs, addressSet);
       this.blocksProcessed++;
       await this.updateLiveWorker(blockWithLogs.block.number);
       this.emitProgress(
@@ -1048,7 +1143,8 @@ export class ChainSyncer {
     fromBlock: bigint,
     toBlock: bigint
   ): Promise<void> {
-    const addresses = this.getContractAddresses();
+    const addresses = await this.getContractAddresses();
+    const addressSet = new Set(addresses.map(a => a.toLowerCase()));
     const filter =
       addresses.length > 0
         ? { address: addresses as `0x${string}`[], fromBlock, toBlock }
@@ -1061,7 +1157,14 @@ export class ChainSyncer {
     )) {
       if (this.abortController?.signal.aborted) break;
 
-      await this.processBlock(blockWithLogs);
+      // Discover any new children in this block
+      if (this.factoryWatcher.hasFactories()) {
+        for (const log of blockWithLogs.logs) {
+          await this.factoryWatcher.processLog(log);
+        }
+      }
+
+      await this.processBlock(blockWithLogs, addressSet);
       currentBlock = blockWithLogs.block.number;
       this.blocksProcessed++;
 
@@ -1103,18 +1206,47 @@ export class ChainSyncer {
         updatedAt: now,
       });
     }
+
+    // Notify processor that live block has been synced
+    if (this.eventNotifier) {
+      await this.eventNotifier.notify('sync_events', {
+        type: 'live_block_synced',
+        chainId: this.chainId,
+        blockNumber: currentBlock,
+        timestamp: new Date(),
+      });
+    }
   }
 
   /**
    * Process a single block with logs
    */
-  private async processBlock(blockWithLogs: BlockWithLogs): Promise<void> {
+  private async processBlock(
+    blockWithLogs: BlockWithLogs,
+    knownAddresses: Set<string>
+  ): Promise<void> {
     const { block, logs } = blockWithLogs;
 
     if (logs.length === 0) return;
 
+    // Discover any new factory children in this block
+    if (this.factoryWatcher.hasFactories()) {
+      for (const log of logs) {
+        const discovered = await this.factoryWatcher.processLog(log);
+        // If we discovered a new child, add it to known addresses for this block
+        if (discovered) {
+          const childAddresses = await this.factoryWatcher.getAllChildAddresses();
+          for (const addresses of childAddresses.values()) {
+            for (const addr of addresses) {
+              knownAddresses.add(addr.toLowerCase());
+            }
+          }
+        }
+      }
+    }
+
     // Filter logs for our contracts
-    const relevantLogs = this.filterRelevantLogs(logs);
+    const relevantLogs = this.filterRelevantLogs(logs, knownAddresses);
 
     if (relevantLogs.length === 0) return;
 
@@ -1134,26 +1266,23 @@ export class ChainSyncer {
 
   /**
    * Filter logs for relevant contracts
+   * Note: Uses cached static addresses only (child addresses handled in filter)
    */
-  private filterRelevantLogs(logs: readonly Log[]): Log[] {
-    const addresses = new Set(
-      this.getContractAddresses().map((a) => a.toLowerCase())
-    );
-
-    if (addresses.size === 0) {
+  private filterRelevantLogs(logs: readonly Log[], knownAddresses: Set<string>): Log[] {
+    if (knownAddresses.size === 0) {
       // No address filter - return all logs
       return logs as Log[];
     }
 
     return logs.filter((log) =>
-      addresses.has(log.address.toLowerCase())
+      knownAddresses.has(log.address.toLowerCase())
     ) as Log[];
   }
 
   /**
-   * Get contract addresses from config
+   * Get contract addresses from config (static addresses only)
    */
-  private getContractAddresses(): string[] {
+  private getStaticContractAddresses(): string[] {
     const addresses: string[] = [];
 
     for (const contract of this.contracts) {
@@ -1162,10 +1291,37 @@ export class ChainSyncer {
       } else if (Array.isArray(contract.address)) {
         addresses.push(...contract.address);
       }
-      // Factory addresses are handled separately
+      // Factory child addresses are fetched dynamically
     }
 
     return addresses;
+  }
+
+  /**
+   * Get all contract addresses including factory children
+   */
+  private async getContractAddresses(): Promise<string[]> {
+    const staticAddresses = this.getStaticContractAddresses();
+    
+    // Add factory addresses (the factory contracts themselves)
+    const factoryAddresses = this.factoryWatcher.getFactoryAddresses();
+    
+    // Get all known child addresses from factories
+    const childAddressesMap = await this.factoryWatcher.getAllChildAddresses();
+    const childAddresses: string[] = [];
+    for (const addresses of childAddressesMap.values()) {
+      childAddresses.push(...addresses);
+    }
+    
+    // Combine all addresses
+    const allAddresses = [
+      ...staticAddresses,
+      ...factoryAddresses,
+      ...childAddresses,
+    ];
+    
+    // Remove duplicates
+    return [...new Set(allAddresses.map(a => a.toLowerCase()))];
   }
 
   /**

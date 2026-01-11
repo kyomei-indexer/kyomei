@@ -206,6 +206,7 @@ export class FactoryRepository implements IFactoryRepository {
       createdAtTxHash: row.createdAtTxHash,
       createdAtLogIndex: row.createdAtLogIndex,
       metadata: row.metadata,
+      childAbi: row.childAbi,
       createdAt: row.createdAt,
     };
   }

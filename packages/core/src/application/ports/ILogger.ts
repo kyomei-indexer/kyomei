@@ -42,16 +42,22 @@ export interface PhaseProgress {
 export interface ProgressInfo {
   /** Chain name */
   chain: string;
-  /** Blocks synced */
+  /** Blocks synced or processed */
   blocksSynced: number;
-  /** Total blocks to sync */
+  /** Total blocks to sync or process */
   totalBlocks: number;
+  /** Events processed (for processor phase) */
+  eventsProcessed?: number;
+  /** Total events to process (for processor phase) */
+  totalEvents?: number;
   /** Percentage complete (0-100) */
   percentage: number;
   /** Phase (syncing, processing, etc.) */
   phase: 'syncing' | 'processing' | 'live';
-  /** Blocks per second */
+  /** Blocks per second (for syncer) */
   blocksPerSecond?: number;
+  /** Events per second (for processor) */
+  eventsPerSecond?: number;
   /** Number of workers */
   workers?: number;
   /** Estimated time remaining (seconds) */

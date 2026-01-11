@@ -1,9 +1,6 @@
 export { HandlerExecutor } from './services/HandlerExecutor.ts';
 export type { HandlerExecutorOptions } from './services/HandlerExecutor.ts';
 
-export { PonderCompat, createPonder } from './services/PonderCompat.ts';
-export type { TypedEventContext } from './services/PonderCompat.ts';
-
 // Kyomei - The main API for event handler registration
 export { Kyomei, createKyomei, kyomeiFromConfig } from './Kyomei.ts';
 export type {

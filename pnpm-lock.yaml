@@ -244,6 +244,19 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.19.3)
 
+  packages/events:
+    dependencies:
+      postgres:
+        specifier: ^3.4.5
+        version: 3.4.8
+    devDependencies:
+      tsup:
+        specifier: ^8.3.5
+        version: 8.5.1(jiti@2.6.1)(postcss@8.5.6)(typescript@5.9.3)(yaml@2.8.2)
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+
   packages/processor:
     dependencies:
       '@kyomei/config':
@@ -255,6 +268,9 @@ importers:
       '@kyomei/database':
         specifier: workspace:*
         version: link:../database
+      '@kyomei/events':
+        specifier: workspace:*
+        version: link:../events
       abitype:
         specifier: ^1.0.8
         version: 1.2.3(typescript@5.9.3)(zod@3.25.76)
@@ -292,12 +308,18 @@ importers:
       '@kyomei/database':
         specifier: workspace:*
         version: link:../database
+      '@kyomei/events':
+        specifier: workspace:*
+        version: link:../events
       '@kyomei/processor':
         specifier: workspace:*
         version: link:../processor
       '@kyomei/syncer':
         specifier: workspace:*
         version: link:../syncer
+      postgres:
+        specifier: ^3.4.5
+        version: 3.4.8
     devDependencies:
       tsup:
         specifier: ^8.3.5
@@ -320,6 +342,9 @@ importers:
       '@kyomei/database':
         specifier: workspace:*
         version: link:../database
+      '@kyomei/events':
+        specifier: workspace:*
+        version: link:../events
       drizzle-orm:
         specifier: ^0.39.3
         version: 0.39.3(postgres@3.4.8)
